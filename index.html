@@ -83,7 +83,7 @@ function addExpense(){let desc=document.getElementById('exdesc').value,amount=do
 function delExpense(i){state.expenses.splice(i,1);localStorage.setItem(STORE,JSON.stringify(state));showExpenses()}
 function saveDiary(){state.diary=document.getElementById('diary').value;localStorage.setItem(STORE,JSON.stringify(state));alert('Diary saved on this device.')}
 function resetEdits(){if(confirm('Reset all local edits, notes, expenses and diary on this device?')){localStorage.removeItem(STORE);state={};renderHome();}}
-function nav(active='home'){document.getElementById('nav').innerHTML=`<button class="pill ${active==='home'?'active':''}" onclick="renderHome();setActiveNav('home')">🏠 Home</button>`+[1,2,3,4,5,6,7,8,9].map(w=>`<button class="pill ${active===('w'+w)?'active':''}" onclick="showWeek(${w})">W${w}</button>`).join('')+`<button class="pill ${active==='all'?'active':''}" onclick="showAll()">All days</button>`}
+function nav(active='home'){document.getElementById('nav').innerHTML=`<button class="pill ${active==='home'?'active':''}"onclick="renderHome();setActiveNav('home');window.scrollTo({top:0,behavior:'smooth'})">🏠 Home</button>`+[1,2,3,4,5,6,7,8,9].map(w=>`<button class="pill ${active===('w'+w)?'active':''}" onclick="showWeek(${w})">W${w}</button>`).join('')+`<button class="pill ${active==='all'?'active':''}" onclick="showAll()">All days</button>`}
 function showWeek(w){nav('w'+w);let ds=mergedDays();renderWeeks(ds);requestAnimationFrame(()=>document.getElementById('week-'+w)?.scrollIntoView({behavior:'smooth',block:'start'}))}
 nav();loadTextSize();syncStickyOffset();window.addEventListener('resize',syncStickyOffset);renderHome();
 </script></body></html>
