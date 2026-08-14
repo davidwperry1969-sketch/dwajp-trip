@@ -1,0 +1,6 @@
+name = "dwajp-route-intelligence"
+main = "workers/route-intelligence.js"
+compatibility_date = "2026-08-14"
+
+[vars]
+ROUTE_INTELLIGENCE_LIVE_ENABLED = "false"
