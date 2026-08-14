@@ -47,7 +47,7 @@ const LINKS={
  hertz:'https://www.hertz.com/', cruise:'https://www.cruiseamerica.com/', disney:'https://disneyland.disney.go.com/',
  maps:'https://www.google.com/maps/'
 };
-Object.assign(DAYS.find(day=>day.date==='2026-09-23'),{plan:'French Quarter RV Resort • CONFIRMED 22–24 Sep • Second booked night • Confirmation 2026075827 • Paid • Houston SKIPPED • Use the time to slow down, rest or reposition',contact:'French Quarter RV Resort\n500 N Claiborne Ave\n+1 504-586-3000\nConfirmation 2026075827',status:'CONFIRMED'});
+Object.assign(DAYS.find(day=>day.date==='2026-09-23'),{weather:'22–30°C • LOCAL',plan:'French Quarter RV Resort • CONFIRMED 22–24 Sep • Second booked night • Confirmation 2026075827 • Paid • Houston SKIPPED • Use the time to slow down, rest or reposition',contact:'French Quarter RV Resort\n500 N Claiborne Ave\n+1 504-586-3000\nConfirmation 2026075827',status:'CONFIRMED'});
 function loadState(){try{return JSON.parse(localStorage.getItem(STORE)||'{}')}catch(e){return {}}}
 let state=loadState();
 function esc(x){return String(x??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}

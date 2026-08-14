@@ -64,6 +64,8 @@ assert.ok(analysis.proposals.some(item => /earlier departure opportunity/.test(i
 assert.equal(run("impactClass(mergedDays().find(d=>d.date==='2026-09-22')).label"), '🔴 LOCKED');
 assert.equal(run("DAYS.find(day=>day.date==='2026-09-23').status"), 'CONFIRMED', 'the second booked night is confirmed in the itinerary source');
 assert.match(run("DAYS.find(day=>day.date==='2026-09-23').contact"), /French Quarter RV Resort/);
+assert.equal(run("travelKm(DAYS.find(day=>day.date==='2026-09-23'))"), 0, 'the local second night has no stale driving distance');
+assert.equal(run("pressure(DAYS.find(day=>day.date==='2026-09-23'))"), 'easy', 'the local second night is not marked busy');
 assert.equal(run("DAYS.find(day=>day.date==='2026-09-24').status"), 'PLANNED', 'the checkout day remains unchanged');
 assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-09-23'))"), /French Quarter RV Resort/);
 assert.doesNotMatch(run("dayCard(mergedDays().find(day=>day.date==='2026-09-23'))"), /accommodation to be confirmed/i);
