@@ -47,12 +47,11 @@ const LINKS={
  hertz:'https://www.hertz.com/', cruise:'https://www.cruiseamerica.com/', disney:'https://disneyland.disney.go.com/',
  maps:'https://www.google.com/maps/'
 };
-const ACCOMMODATION_BOOKINGS=[{name:'French Quarter RV Resort',checkIn:'2026-09-22',checkOut:'2026-09-24',nights:2,confirmation:'2026075827',contact:'French Quarter RV Resort\n500 N Claiborne Ave\n+1 504-586-3000\nConfirmation 2026075827'}];
+Object.assign(DAYS.find(day=>day.date==='2026-09-23'),{plan:'French Quarter RV Resort • CONFIRMED 22–24 Sep • Second booked night • Confirmation 2026075827 • Paid • Houston SKIPPED • Use the time to slow down, rest or reposition',contact:'French Quarter RV Resort\n500 N Claiborne Ave\n+1 504-586-3000\nConfirmation 2026075827',status:'CONFIRMED'});
 function loadState(){try{return JSON.parse(localStorage.getItem(STORE)||'{}')}catch(e){return {}}}
 let state=loadState();
 function esc(x){return String(x??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
-function accommodationForNight(date){return ACCOMMODATION_BOOKINGS.find(booking=>date>=booking.checkIn&&date<booking.checkOut)||null}
-function mergedDays(){return DAYS.filter(d=>!(state.removedDays||[]).includes(d.date)).map(d=>{let day={...d,...(state.days?.[d.date]||{})},booking=accommodationForNight(day.date);return booking?{...day,status:'CONFIRMED',contact:booking.contact,accommodationBooking:booking}:day})}
+function mergedDays(){return DAYS.filter(d=>!(state.removedDays||[]).includes(d.date)).map(d=>({...d,...(state.days?.[d.date]||{})}))}
 function mapQuery(query){return encodeURIComponent(query).replace(/'/g,'%27')}
 function placeLink(label,query){return query?`<a class="placeLink" href="https://www.google.com/maps/search/?api=1&query=${esc(mapQuery(query))}" target="_blank" rel="noopener">${esc(label)}</a>`:esc(label)}
 function looksLikeAddress(text){return /^\d{1,6}\s+.+/.test(String(text||'').trim())}

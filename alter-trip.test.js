@@ -62,9 +62,9 @@ assert.ok(analysis.affected.some(item => item.day.date === '2026-09-11' && item.
 assert.ok(analysis.proposals.some(item => /split the 610 km drive/.test(item.title)));
 assert.ok(analysis.proposals.some(item => /earlier departure opportunity/.test(item.title)));
 assert.equal(run("impactClass(mergedDays().find(d=>d.date==='2026-09-22')).label"), '🔴 LOCKED');
-assert.deepEqual([...run("mergedDays().filter(day=>day.accommodationBooking?.confirmation==='2026075827').map(day=>day.date)")], ['2026-09-22', '2026-09-23'], 'the two-night booking covers both nights');
-assert.equal(run("accommodationForNight('2026-09-24')"), null, 'checkout day is not counted as a booked night');
-assert.equal(run("mergedDays().find(day=>day.date==='2026-09-23').status"), 'CONFIRMED');
+assert.equal(run("DAYS.find(day=>day.date==='2026-09-23').status"), 'CONFIRMED', 'the second booked night is confirmed in the itinerary source');
+assert.match(run("DAYS.find(day=>day.date==='2026-09-23').contact"), /French Quarter RV Resort/);
+assert.equal(run("DAYS.find(day=>day.date==='2026-09-24').status"), 'PLANNED', 'the checkout day remains unchanged');
 assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-09-23'))"), /French Quarter RV Resort/);
 assert.doesNotMatch(run("dayCard(mergedDays().find(day=>day.date==='2026-09-23'))"), /accommodation to be confirmed/i);
 assert.equal(run("isLocked(mergedDays().find(d=>d.date==='2026-09-21'))"), false, 'a buffer day that mentions a future booking is not itself protected');
