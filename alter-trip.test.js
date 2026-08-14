@@ -62,6 +62,11 @@ assert.ok(analysis.affected.some(item => item.day.date === '2026-09-11' && item.
 assert.ok(analysis.proposals.some(item => /split the 610 km drive/.test(item.title)));
 assert.ok(analysis.proposals.some(item => /earlier departure opportunity/.test(item.title)));
 assert.equal(run("impactClass(mergedDays().find(d=>d.date==='2026-09-22')).label"), '🔴 LOCKED');
+assert.deepEqual([...run("mergedDays().filter(day=>day.accommodationBooking?.confirmation==='2026075827').map(day=>day.date)")], ['2026-09-22', '2026-09-23'], 'the two-night booking covers both nights');
+assert.equal(run("accommodationForNight('2026-09-24')"), null, 'checkout day is not counted as a booked night');
+assert.equal(run("mergedDays().find(day=>day.date==='2026-09-23').status"), 'CONFIRMED');
+assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-09-23'))"), /French Quarter RV Resort/);
+assert.doesNotMatch(run("dayCard(mergedDays().find(day=>day.date==='2026-09-23'))"), /accommodation to be confirmed/i);
 assert.equal(run("isLocked(mergedDays().find(d=>d.date==='2026-09-21'))"), false, 'a buffer day that mentions a future booking is not itself protected');
 assert.equal(run("isLocked({status:'PLANNED',plan:'Confirmed campground check-in',contact:''})"), true, 'a genuine confirmed stay remains protected');
 assert.equal(run("isLocked({status:'PLANNED',plan:'RV pickup at 13:00',contact:''})"), true, 'a timed vehicle pickup remains protected');
