@@ -44,6 +44,21 @@ assert.match(html, /function scrollDashboardSectionIntoView\(\)\{[\s\S]*scrollIn
 run('renderHome()');
 assert.match(context.document.getElementById('nav').innerHTML, /Home[\s\S]*W1[\s\S]*W9[\s\S]*All days/);
 
+// Unconfirmed overnight suggestions are visibly separate and never upgrade a booking.
+for (const date of ['2026-09-06','2026-09-16','2026-09-17','2026-09-20','2026-09-21','2026-09-24','2026-09-25','2026-09-26','2026-09-27','2026-10-13','2026-10-14','2026-10-15']) {
+  const suggestionCard = run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`);
+  assert.match(suggestionCard, /OVERNIGHT — NOT BOOKED/, `${date} shows unconfirmed overnight options`);
+  assert.match(suggestionCard, /Use this stop — connect to Alter Trip later/);
+  assert.match(suggestionCard, /google\.com\/maps\/search/);
+}
+for (const date of ['2026-09-22','2026-09-23']) assert.doesNotMatch(run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`), /OVERNIGHT — NOT BOOKED/, `${date} keeps its confirmed booking distinct`);
+assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-09-06'))"), /CHECK BEFORE ARRIVAL/);
+assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-10-13'))"), /Designated campground required/);
+assert.match(html, /@media\(max-width:720px\)\{\.overnight-suggestions[\s\S]*\.overnight-grid\{grid-template-columns:1fr\}/, 'overnight suggestions collapse to one column on phones');
+run("state={}; globalThis.overnightStateBefore=JSON.stringify(state); overnightSuggestionNotice(); globalThis.overnightStateAfter=JSON.stringify(state)");
+assert.equal(context.overnightStateAfter, context.overnightStateBefore, 'the future Use this stop action does not alter itinerary state');
+assert.equal(localStorage.getItem('dwajp-trip-v5'), null, 'the future Use this stop action does not persist a booking');
+
 // 2. Find Something is research-only: results do not update itinerary or storage.
 const beforeFind = JSON.stringify(localStorage.data);
 run("showAlterMode('find'); document.getElementById('findText').value='Find the best deli sandwich in NYC'; findSomething();");
