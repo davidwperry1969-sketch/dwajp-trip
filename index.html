@@ -78,13 +78,108 @@ const OVERNIGHT_SUGGESTIONS={
  ],
  '2026-09-25':null,'2026-09-26':null,'2026-09-27':null,
  '2026-10-13':[
-  {type:'RV park / campground',name:'Fishing Bridge RV Park',detail:'In-park full-hookup RV option listed through 17 Oct 2026; reservation and site-length checks required.',query:'Fishing Bridge RV Park Yellowstone',phone:'+1 307-344-7381'},
+  {type:'RV park / campground',name:'Fishing Bridge RV Park',detail:'Published 2026 operating dates run through 18 Oct but are subject to change; reservation and site-length checks required.',query:'Fishing Bridge RV Park Yellowstone',phone:'+1 307-344-7381'},
   {type:'Low-cost campground',name:'Mammoth Campground',detail:'Designated Yellowstone campground open year-round; check current availability and RV length limits.',query:'Mammoth Campground Yellowstone National Park',phone:'+1 307-344-7381'},
   {type:'Important park rule',name:'Designated campground required',detail:'Overnight vehicle parking is not allowed in Yellowstone pullouts, parking areas or picnic grounds.',query:'Yellowstone National Park campgrounds',warning:'CHECK BEFORE ARRIVAL — reserve or confirm a designated campsite; do not treat park parking areas as overnight stops.'}
  ],
  '2026-10-14':null,'2026-10-15':null
 };
 ['2026-09-17','2026-09-21','2026-09-25','2026-09-26','2026-09-27','2026-10-14','2026-10-15'].forEach(date=>OVERNIGHT_SUGGESTIONS[date]=OVERNIGHT_SUGGESTIONS[date]||OVERNIGHT_SUGGESTIONS[date==='2026-09-17'?'2026-09-16':date==='2026-09-21'?'2026-09-20':date.startsWith('2026-09-2')?'2026-09-24':'2026-10-13']);
+const OVERNIGHT_PARKING_WARNING='CHECK BEFORE ARRIVAL — overnight parking depends on the individual store and local rules.';
+function suggestedOvernight(type,name,detail,query,phone,warning){return {type,name,detail,query,...(phone?{phone}:{}),...(warning?{warning}:{})}}
+function assignOvernightSuggestions(dates,options){dates.forEach(date=>{if(!OVERNIGHT_SUGGESTIONS[date])OVERNIGHT_SUGGESTIONS[date]=options})}
+assignOvernightSuggestions(['2026-09-01','2026-09-02','2026-09-03'],[
+ suggestedOvernight('RV park / campground','Liberty Harbor RV Park','11 Marin Blvd, Jersey City, NJ. Closest practical RV base for Manhattan; confirm a site for a roughly 30-ft RV and current transit access.','Liberty Harbor RV Park 11 Marin Blvd Jersey City NJ','+1 201-516-7500'),
+ suggestedOvernight('Campground lead','Gateway National Recreation Area camping','Check current campground operations, reservation rules, vehicle length and the drive into New York before relying on this option.','Gateway National Recreation Area camping New York'),
+ suggestedOvernight('Legal overnight parking search','Overnight RV parking near Jersey City','No specific car park is approved here; identify a legal facility and obtain permission before arrival.','legal overnight RV parking near Jersey City NJ',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-09-04','2026-09-05'],[
+ suggestedOvernight('RV park / campground','Cherry Hill Park','9800 Cherry Hill Rd, College Park, MD. Full-service RV base named in the itinerary; confirm booking, site length and access for the 30-ft RV.','Cherry Hill Park 9800 Cherry Hill Rd College Park MD','+1 301-937-7116'),
+ suggestedOvernight('Low-cost campground','Greenbelt Park Campground','6565 Greenbelt Rd, Greenbelt, MD. National Park Service campground; reservations are required and the published RV maximum is 35 ft.','Greenbelt Park Campground 6565 Greenbelt Rd Greenbelt MD','+1 771-208-1588'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near College Park','No hookups or campground facilities; ask before parking and check municipal restrictions.','Walmart near College Park MD',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-09-07'],OVERNIGHT_SUGGESTIONS['2026-09-06']);
+assignOvernightSuggestions(['2026-09-08','2026-09-09'],[
+ suggestedOvernight('RV park / campground','Groveland Oaks County Park','14555 Dixie Hwy, Holly, MI. County campground near Ortonville; verify season dates, reservation requirements and a suitable 30-ft site.','Groveland Oaks County Park 14555 Dixie Hwy Holly MI','+1 248-634-9811'),
+ suggestedOvernight('Low-cost campground','Holly Recreation Area','8100 Grange Hall Rd, Holly, MI. State recreation-area camping; check seasonal operation and RV site dimensions.','Holly Recreation Area campground 8100 Grange Hall Rd Holly MI','+1 248-634-8811'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Waterford / Pontiac','Use only with store permission; no hookups and local restrictions may apply.','Walmart near Ortonville MI',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-09-10','2026-09-11','2026-09-12','2026-09-13','2026-09-14'],[
+ suggestedOvernight('RV park / campground','Wisconsin State Fair RV Park','601 S 76th St, West Allis, WI. Urban RV base near Milwaukee; confirm event closures, availability and 30-ft rig fit.','Wisconsin State Fair RV Park 601 S 76th St West Allis WI','+1 414-266-7035'),
+ suggestedOvernight('Low-cost campground','Cliffside Park Campground','7320 Michna Rd, Racine, WI. County campground south of Milwaukee; check season, reservations and site length.','Cliffside Park Campground 7320 Michna Rd Racine WI','+1 262-886-8440'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Milwaukee','Select a store outside restricted central areas and obtain permission; no hookups.','Walmart near Milwaukee WI',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-09-15'],[
+ suggestedOvernight('RV park / campground','Kamp Komfort RV Park','21408 N 600 East Rd, Carlock, IL. RV park northwest of Bloomington; verify availability and a site suitable for the 30-ft RV.','Kamp Komfort RV Park 21408 N 600 East Rd Carlock IL','+1 309-376-4411'),
+ suggestedOvernight('Low-cost campground','Moraine View State Recreation Area','27374 Moraine View Park Rd, Le Roy, IL. State campground east of Bloomington; check season and reservations.','Moraine View State Recreation Area campground Le Roy IL','+1 309-724-8032'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Bloomington','No hookups; obtain store permission and check Bloomington/Normal rules.','Walmart near Bloomington IL',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-09-18','2026-09-19'],[
+ suggestedOvernight('RV park / campground','Bristol / Kingsport KOA Holiday','425 Rocky Branch Rd, Blountville, TN. Practical Bristol-area RV base; confirm availability and 30-ft site fit.','Bristol Kingsport KOA 425 Rocky Branch Rd Blountville TN','+1 423-323-7790'),
+ suggestedOvernight('Low-cost campground','Warriors Path State Park Campground','490 Hemlock Rd, Kingsport, TN. State-park camping; check reservations, event demand and RV dimensions.','Warriors Path State Park campground 490 Hemlock Rd Kingsport TN','+1 423-239-8531'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Bristol','Race-event restrictions and demand may be significant; obtain permission before relying on a store.','Walmart near Bristol TN',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-09-28','2026-09-29'],[
+ suggestedOvernight('RV park / campground','Big Texan RV Ranch','1414 Sunrise Dr, Amarillo, TX. RV park already named in the itinerary; confirm booking and 30-ft site fit.','Big Texan RV Ranch 1414 Sunrise Dr Amarillo TX','+1 806-373-4962'),
+ suggestedOvernight('Low-cost campground','Palo Duro Canyon State Park','11450 State Hwy Park Rd 5, Canyon, TX. Check campsite availability, road grades, weather and RV length restrictions.','Palo Duro Canyon State Park campground Canyon TX','+1 806-488-2227'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Amarillo','No hookups; obtain permission from the individual store and check local rules.','Walmart near Amarillo TX',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-09-30'],[
+ suggestedOvernight('RV park / campground','USA RV Park','2925 W Historic Hwy 66, Gallup, NM. Full-service Gallup RV option; confirm availability and site size.','USA RV Park 2925 W Historic Hwy 66 Gallup NM','+1 505-863-5021'),
+ suggestedOvernight('Free / low-cost campground','El Morro National Monument Campground','NM-53 near Ramah, NM. First-come campground is subject to operating conditions; no hookups and check RV/site limits before arrival.','El Morro National Monument campground New Mexico','+1 505-783-4226'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Gallup','No hookups; ask the store and check city or tribal-land rules before arrival.','Walmart near Gallup NM',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-10-01','2026-10-02'],[
+ suggestedOvernight('RV park / campground','Trailer Village RV Park','100 Market Plaza Rd, Grand Canyon Village, AZ. Full-hookup option with sites published for 28–50 ft vehicles; check availability.','Trailer Village RV Park Grand Canyon Village AZ','+1 877-404-4614'),
+ suggestedOvernight('Low-cost campground','Mather Campground','1 Mather Campground Rd, Grand Canyon Village. No hookups; published RV maximum is 30 ft, so confirm the exact vehicle/site fit and reservation.','Mather Campground Grand Canyon Village AZ','+1 877-444-6777'),
+ suggestedOvernight('Important park rule','Designated campsite required','Do not use overlooks, pullouts or visitor parking overnight. Check Kaibab National Forest rules separately for any dispersed-camping plan.','Grand Canyon National Park camping rules',null,'CHECK BEFORE ARRIVAL — use only a reserved/authorised campsite and verify current fire, road and RV restrictions.')
+]);
+assignOvernightSuggestions(['2026-10-03','2026-10-04','2026-10-05'],[
+ suggestedOvernight('RV park / campground','Oasis Las Vegas RV Resort','2711 W Windmill Ln, Las Vegas, NV. Resort named in the itinerary; confirm booking and 30-ft site dimensions.','Oasis Las Vegas RV Resort 2711 W Windmill Ln Las Vegas NV','+1 702-260-2001'),
+ suggestedOvernight('RV park alternative','Las Vegas RV Resort','3890 S Nellis Blvd, Las Vegas, NV. Confirm current rates, availability, age policies and RV dimensions.','Las Vegas RV Resort 3890 S Nellis Blvd Las Vegas NV','+1 702-451-2719'),
+ suggestedOvernight('Overnight parking suggestion','Legal overnight RV parking near Las Vegas','Do not assume casino or retail parking permits overnight stays; obtain express permission.','legal overnight RV parking Las Vegas NV',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-10-06','2026-10-07','2026-10-08'],[
+ suggestedOvernight('RV park / campground','Upper Pines Campground','Yosemite Valley. No hookups; reservations are highly competitive and RV length/road restrictions must be checked.','Upper Pines Campground Yosemite National Park','+1 877-444-6777'),
+ suggestedOvernight('Low-cost campground','Wawona Campground','Wawona Rd, Yosemite National Park. Check seasonal operation, reservations, site dimensions and route restrictions.','Wawona Campground Yosemite National Park','+1 877-444-6777'),
+ suggestedOvernight('Important park rule','Designated campsite required','Sleeping in vehicles or roadside parking is not permitted outside a registered campground.','Yosemite National Park campground rules',null,'CHECK BEFORE ARRIVAL — reserve or confirm a designated campsite; verify weather, road closures and RV length limits.')
+]);
+assignOvernightSuggestions(['2026-10-09','2026-10-10','2026-10-11','2026-10-12'],[
+ suggestedOvernight('RV park / campground','Iron Horse RV Resort','3400 E Idaho St, Elko, NV. Full-service RV option; confirm availability and site size.','Iron Horse RV Resort 3400 E Idaho St Elko NV','+1 775-777-1919'),
+ suggestedOvernight('Free / low-cost camping lead','South Fork State Recreation Area','South of Elko near Spring Creek. Check campground status, weather, access and site suitability for a 30-ft RV.','South Fork State Recreation Area campground Nevada','+1 775-744-4346'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Elko','No hookups; ask the individual store and check local rules before parking.','Walmart near Elko NV',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-10-16'],[
+ suggestedOvernight('RV park / campground',"Jim & Mary's RV Park",'9800 US-93 N, Missoula, MT. Confirm availability, seasonal operation and a suitable 30-ft site.',"Jim and Mary's RV Park 9800 US-93 N Missoula MT",'+1 406-549-4416'),
+ suggestedOvernight('Low-cost campground lead','Lolo National Forest campground','Choose a developed campground only after checking October operating dates, road access, fire rules and RV length.','Lolo National Forest campground near Missoula MT','+1 406-329-3750'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Missoula','No hookups; obtain permission and check local ordinances before arrival.','Walmart near Missoula MT',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-10-17','2026-10-18','2026-10-19'],[
+ suggestedOvernight('RV park / campground','Maple Grove RV Resort','12417 Hwy 99, Everett, WA. RV base close to the return depot; confirm availability and 30-ft site fit.','Maple Grove RV Resort 12417 Hwy 99 Everett WA','+1 425-423-9600'),
+ suggestedOvernight('Low-cost campground','Flowing Lake County Park Campground','17900 48th St SE, Snohomish, WA. County campground; check October operations, reservations and RV length.','Flowing Lake County Park campground Snohomish WA','+1 425-388-6600'),
+ suggestedOvernight('Overnight parking suggestion','Walmart near Everett','No hookups; city/store restrictions may apply, so obtain permission first.','Walmart near Everett WA',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-10-20'],[
+ suggestedOvernight('Hotel suggestion — vehicle returned','Hotel near San Francisco Airport','Choose only after checking the actual SFO arrival and Hertz pickup timing; confirm parking for the RAM 2500.','hotel near San Francisco International Airport with oversized parking'),
+ suggestedOvernight('Lower-cost lodging search','Airport lodging with parking','Compare current rates, cancellation terms, late arrival and vehicle-height limits.','budget hotel near SFO with truck parking'),
+ suggestedOvernight('Legal overnight parking search','Authorised overnight parking near SFO','Do not sleep in airport or rental-car parking unless explicitly permitted.','legal overnight parking near SFO',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-10-21'],[
+ suggestedOvernight('RV park / campground','Monterey County Fair RV Park','2004 Fairground Rd, Monterey, CA. Confirm event closures, availability and whether the current vehicle/setup is accepted.','Monterey County Fair RV Park 2004 Fairground Rd Monterey CA','+1 831-717-7167'),
+ suggestedOvernight('Low-cost campground','Veterans Memorial Park Campground','1200 Veterans Dr, Monterey, CA. Small city campground; verify vehicle limits and availability before arrival.','Veterans Memorial Park campground Monterey CA','+1 831-646-3865'),
+ suggestedOvernight('Overnight parking suggestion','Legal overnight parking on the Central Coast','Many coastal councils restrict vehicle sleeping; use only an authorised facility.','legal overnight RV parking Monterey CA',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-10-22','2026-10-23','2026-10-24'],[
+ suggestedOvernight('RV park / campground','San Diego Metro KOA Resort','111 N 2nd Ave, Chula Vista, CA. Confirm availability, rates and vehicle/site fit.','San Diego Metro KOA 111 N 2nd Ave Chula Vista CA','+1 619-427-3601'),
+ suggestedOvernight('RV park alternative','Campland on the Bay','2211 Pacific Beach Dr, San Diego, CA. Confirm availability, site dimensions and current resort rules.','Campland on the Bay 2211 Pacific Beach Dr San Diego CA','+1 858-581-4200'),
+ suggestedOvernight('Overnight parking suggestion','Legal overnight parking near San Diego','Street, beach and retail-lot vehicle sleeping is restricted in many areas; obtain specific permission.','legal overnight RV parking San Diego CA',null,OVERNIGHT_PARKING_WARNING)
+]);
+assignOvernightSuggestions(['2026-10-25','2026-10-26'],[
+ suggestedOvernight('Hotel suggestion','Shore Hotel','1515 Ocean Ave, Santa Monica, CA. Hotel named in the itinerary; do not treat it as booked until a confirmation is recorded. Confirm RAM 2500 parking dimensions and fees.','Shore Hotel 1515 Ocean Ave Santa Monica CA','+1 310-458-1515'),
+ suggestedOvernight('Alternative lodging search','Santa Monica hotel with oversized parking','Compare live rates, cancellation terms and garage height/length before booking.','Santa Monica hotel oversized truck parking'),
+ suggestedOvernight('Legal overnight parking search','Authorised overnight parking near Santa Monica','Do not rely on beach, street or retail parking; local restrictions are strict.','legal overnight parking Santa Monica CA',null,OVERNIGHT_PARKING_WARNING)
+]);
+Object.values(OVERNIGHT_SUGGESTIONS).filter(Array.isArray).flat().forEach(option=>{if(/walmart|overnight parking/i.test(`${option.name} ${option.type}`))option.warning=OVERNIGHT_PARKING_WARNING});
 function loadState(){try{return JSON.parse(localStorage.getItem(STORE)||'{}')}catch(e){return {}}}
 let state=loadState();
 function esc(x){return String(x??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}

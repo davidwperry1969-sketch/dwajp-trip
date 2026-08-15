@@ -69,14 +69,23 @@ assert.equal(context.window.printCalls, 1, 'the browser print dialog is invoked 
 run('closePrintCalendar()');
 assert.equal(context.document.body.classList.contains('print-calendar-mode'), false, 'closing print calendar restores normal mode');
 
-// Unconfirmed overnight suggestions are visibly separate and never upgrade a booking.
-for (const date of ['2026-09-06','2026-09-16','2026-09-17','2026-09-20','2026-09-21','2026-09-24','2026-09-25','2026-09-26','2026-09-27','2026-10-13','2026-10-14','2026-10-15']) {
+// Unconfirmed overnight suggestions cover the trip and never upgrade a booking.
+const confirmedAccommodationDates = ['2026-09-22','2026-09-23'];
+const suggestionDates = run("DAYS.map(day=>day.date).filter(date=>date!=='2026-10-27'&&!['2026-09-22','2026-09-23'].includes(date))");
+assert.equal(suggestionDates.length, 54, 'all 54 unconfirmed overnight dates are audited');
+for (const date of suggestionDates) {
   const suggestionCard = run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`);
   assert.match(suggestionCard, /OVERNIGHT — NOT BOOKED/, `${date} shows unconfirmed overnight options`);
   assert.match(suggestionCard, /Use this stop — connect to Alter Trip later/);
   assert.match(suggestionCard, /google\.com\/maps\/search/);
 }
-for (const date of ['2026-09-22','2026-09-23']) assert.doesNotMatch(run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`), /OVERNIGHT — NOT BOOKED/, `${date} keeps its confirmed booking distinct`);
+for (const date of confirmedAccommodationDates) {
+  assert.equal(run(`DAYS.find(day=>day.date==='${date}').status`), 'CONFIRMED');
+  assert.doesNotMatch(run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`), /OVERNIGHT — NOT BOOKED/, `${date} keeps its confirmed booking distinct`);
+}
+assert.doesNotMatch(run("overnightSuggestions({...DAYS.find(day=>day.date==='2026-09-06'),status:'CONFIRMED'})"), /OVERNIGHT — NOT BOOKED/, 'confirmed status suppresses suggestions even when a date has registered options');
+assert.equal(run("Object.values(OVERNIGHT_SUGGESTIONS).filter(Array.isArray).flat().filter(option=>/walmart|overnight parking/i.test(option.name+' '+option.type)).every(option=>option.warning===OVERNIGHT_PARKING_WARNING)"), true, 'every retail or parking option carries the exact arrival warning');
+assert.equal(run("Object.values(OVERNIGHT_SUGGESTIONS).filter(Array.isArray).flat().every(option=>option.name&&option.detail&&option.query)"), true, 'every suggestion has a name, description and map query');
 assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-09-06'))"), /CHECK BEFORE ARRIVAL/);
 assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-10-13'))"), /Designated campground required/);
 assert.match(html, /@media\(max-width:720px\)\{\.overnight-suggestions[\s\S]*\.overnight-grid\{grid-template-columns:1fr\}/, 'overnight suggestions collapse to one column on phones');
