@@ -50,12 +50,15 @@ assert.equal((printMarkup.match(/data-print-page=/g) || []).length, 9, '57 days 
 assert.equal((printMarkup.match(/data-print-date=/g) || []).length, 57, 'every itinerary day is included');
 assert.match(printMarkup, /data-print-page="1"[\s\S]*Tue 1 Sep[\s\S]*Mon 7 Sep/, 'the first page contains the first seven chronological days');
 assert.match(printMarkup, /data-print-page="9"[\s\S]*Tue 27 Oct/, 'the final trip day is included on page nine');
-assert.match(printMarkup, /Temperature:[\s\S]*Distance:[\s\S]*Driving:[\s\S]*Pressure:/, 'day facts include all required travel values');
-assert.match(printMarkup, /Plan \/ logistics \/ important booking information[\s\S]*Accommodation \/ overnight \/ address \/ contact/, 'day entries include plan, booking, overnight and contact details');
+assert.match(printMarkup, /<b>Temperature<\/b>[\s\S]*<b>Distance<\/b>[\s\S]*<b>Driving time<\/b>[\s\S]*<b>Pressure<\/b>/, 'day columns include all required travel values in vertical order');
+assert.match(printMarkup, /Plan \/ logistics \/ important booking details[\s\S]*Accommodation \/ overnight \/ address \/ contact/, 'day columns include plan, booking, overnight and contact details');
 assert.match(printMarkup, /UNCONFIRMED \/ CHECK OR ARRANGE/, 'unconfirmed accommodation remains explicit');
 assert.match(printMarkup, /CONFIRMED \/ BOOKED/, 'confirmed accommodation remains explicit');
 assert.doesNotMatch(printMarkup, /TRIP CONTROL CENTRE|The rules for this trip|MAPS|ALTER TRIP|RESET EDITS/, 'dashboard-only and editing UI is excluded');
 assert.match(html, /@page\{size:landscape/, 'print calendar uses landscape pages');
+assert.match(html, /\.print-calendar-days\{display:grid;grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/, 'each weekly page uses seven equal vertical day columns');
+assert.equal((printMarkup.match(/class="print-calendar-days"/g) || []).length, 9, 'every print page has its own day-column grid');
+assert.equal((printMarkup.match(/class="print-day-section"/g) || []).length, 57 * 8, 'each day column has the eight required labelled sections');
 assert.match(html, /\.print-calendar-page\{[^}]*break-after:page/, 'page breaks occur between calendar weeks');
 assert.match(html, /\.print-day\{[^}]*break-inside:avoid!important/, 'individual day entries avoid splitting across pages');
 run('showPrintCalendar()');
