@@ -17,8 +17,8 @@ const makeElement = () => ({
 });
 const localStorage = { data: {}, getItem(key) { return this.data[key] || null }, setItem(key, value) { this.data[key] = value }, removeItem(key) { delete this.data[key] } };
 const context = {
-  alert() {}, confirm: () => true, localStorage, window: { addEventListener() {}, scrollTo() {} },
-  document: { getElementById(id) { return elements[id] || (elements[id] = makeElement()) }, querySelectorAll() { return [] }, querySelector() { return null }, documentElement: { style: { setProperty() {} } } },
+  alert() {}, confirm: () => true, localStorage, window: { addEventListener() {}, scrollTo() {}, print() { this.printCalls = (this.printCalls || 0) + 1 } },
+  document: { body: { classList: { values: new Set(), add(name) { this.values.add(name) }, remove(name) { this.values.delete(name) }, contains(name) { return this.values.has(name) } } }, getElementById(id) { return elements[id] || (elements[id] = makeElement()) }, querySelectorAll() { return [] }, querySelector() { return null }, documentElement: { style: { setProperty() {} } } },
   requestAnimationFrame: fn => fn(), encodeURIComponent, JSON, String, Date, Set, Math, parseInt
 };
 
@@ -43,6 +43,28 @@ assert.match(html, /\.pill,\.backbtn\{min-height:44px\}/, 'phone navigation cont
 assert.match(html, /function scrollDashboardSectionIntoView\(\)\{[\s\S]*scrollIntoView\(\{behavior:'smooth',block:'start'\}\)/, 'dashboard sections snap below the sticky navigation after opening');
 run('renderHome()');
 assert.match(context.document.getElementById('nav').innerHTML, /Home[\s\S]*W1[\s\S]*W9[\s\S]*All days/);
+
+// PRINT CALENDAR builds a dedicated chronological 57-day calendar, not Home.
+const printMarkup = run('buildPrintCalendarMarkup()');
+assert.equal((printMarkup.match(/data-print-page=/g) || []).length, 9, '57 days are divided across nine print pages');
+assert.equal((printMarkup.match(/data-print-date=/g) || []).length, 57, 'every itinerary day is included');
+assert.match(printMarkup, /data-print-page="1"[\s\S]*Tue 1 Sep[\s\S]*Mon 7 Sep/, 'the first page contains the first seven chronological days');
+assert.match(printMarkup, /data-print-page="9"[\s\S]*Tue 27 Oct/, 'the final trip day is included on page nine');
+assert.match(printMarkup, /Temperature:[\s\S]*Distance:[\s\S]*Driving:[\s\S]*Pressure:/, 'day facts include all required travel values');
+assert.match(printMarkup, /Plan \/ logistics \/ important booking information[\s\S]*Accommodation \/ overnight \/ address \/ contact/, 'day entries include plan, booking, overnight and contact details');
+assert.match(printMarkup, /UNCONFIRMED \/ CHECK OR ARRANGE/, 'unconfirmed accommodation remains explicit');
+assert.match(printMarkup, /CONFIRMED \/ BOOKED/, 'confirmed accommodation remains explicit');
+assert.doesNotMatch(printMarkup, /TRIP CONTROL CENTRE|The rules for this trip|MAPS|ALTER TRIP|RESET EDITS/, 'dashboard-only and editing UI is excluded');
+assert.match(html, /@page\{size:landscape/, 'print calendar uses landscape pages');
+assert.match(html, /\.print-calendar-page\{[^}]*break-after:page/, 'page breaks occur between calendar weeks');
+assert.match(html, /\.print-day\{[^}]*break-inside:avoid!important/, 'individual day entries avoid splitting across pages');
+run('showPrintCalendar()');
+assert.equal(context.document.body.classList.contains('print-calendar-mode'), true, 'dedicated calendar mode is shown before printing');
+assert.doesNotMatch(context.document.getElementById('app').innerHTML, /TRIP CONTROL CENTRE|The rules for this trip/);
+run('printCalendar()');
+assert.equal(context.window.printCalls, 1, 'the browser print dialog is invoked after building the calendar');
+run('closePrintCalendar()');
+assert.equal(context.document.body.classList.contains('print-calendar-mode'), false, 'closing print calendar restores normal mode');
 
 // Unconfirmed overnight suggestions are visibly separate and never upgrade a booking.
 for (const date of ['2026-09-06','2026-09-16','2026-09-17','2026-09-20','2026-09-21','2026-09-24','2026-09-25','2026-09-26','2026-09-27','2026-10-13','2026-10-14','2026-10-15']) {
