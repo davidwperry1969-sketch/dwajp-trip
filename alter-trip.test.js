@@ -319,6 +319,71 @@ assert.equal(localStorage.getItem('dwajp-trip-v5'), null);
 assert.equal(run("mergedDays().some(d=>d.date==='2026-09-02')"), true);
 assert.equal(run("mergedDays().find(d=>d.date==='2026-09-01').plan"), 'The Gallivant Times Square • Arrive / settle in • Battery Park ferry / Statue of Liberty');
 
+// Alter Trip 2.0 A-J: every command is analysed before a separately approved write.
+run("state={}; localStorage.removeItem(STORE); globalThis.alter2Green=analyseAlter2Request('Skip Tijuana.'); globalThis.alter2GreenBefore=JSON.stringify(state)");
+assert.equal(context.alter2Green.status, 'GREEN', 'A. an isolated optional change is GREEN');
+assert.deepEqual([...context.alter2Green.affected.map(item => item.date)], ['2026-10-24']);
+assert.equal(context.alter2GreenBefore, '{}', 'analysis never mutates itinerary state');
+run("renderAlter2Analysis(globalThis.alter2Green)");
+assert.match(modal.innerHTML, /GREEN[\s\S]*Affected days[\s\S]*Sat 24 Oct/);
+assert.match(modal.innerHTML, /LEAVE IT[\s\S]*MAKE A CHANGE/);
+
+run("globalThis.alter2Yellow=analyseAlter2Request('Stay another night in Milwaukee.')");
+assert.equal(context.alter2Yellow.status, 'YELLOW', 'B. a cascading extra night is YELLOW');
+assert.deepEqual([...context.alter2Yellow.affected.map(item => item.date)], ['2026-09-14', '2026-09-15', '2026-09-16']);
+assert.equal(context.alter2Yellow.requiresRouteVerification, true);
+assert.match(context.alter2Yellow.summary, /following travel chain/i);
+
+run("globalThis.alter2AccommodationRed=analyseAlter2Request('Move the confirmed French Quarter accommodation.')");
+assert.equal(context.alter2AccommodationRed.status, 'RED', 'C. confirmed accommodation conflicts are RED');
+assert.deepEqual([...context.alter2AccommodationRed.affected.slice(0, 2).map(item => item.date)], ['2026-09-22', '2026-09-23']);
+assert.equal(context.alter2AccommodationRed.changes.length, 0);
+
+run("globalThis.alter2TransportRed=analyseAlter2Request('Move the Qantas flight and Hertz vehicle return later.')");
+assert.equal(context.alter2TransportRed.status, 'RED', 'D. flights and vehicle returns are RED');
+assert.ok(context.alter2TransportRed.affected.some(item => item.date === '2026-10-27'));
+
+run("state={}; localStorage.removeItem(STORE); renderAlter2Analysis(analyseAlter2Request('Skip Tijuana.')); showAlter2FinalProposal(); globalThis.alter2CancelBefore=JSON.stringify(state); cancelAlter2(); globalThis.alter2CancelAfter=JSON.stringify(state)");
+assert.equal(context.alter2CancelAfter, context.alter2CancelBefore, 'E. CANCEL leaves itinerary state unchanged');
+assert.equal(localStorage.getItem('dwajp-trip-v5'), null);
+
+run("state={}; localStorage.removeItem(STORE); renderAlter2Analysis(analyseAlter2Request('Skip Tijuana.')); showAlter2FinalProposal(); globalThis.alter2FinalHtml=document.getElementById('alterModal').innerHTML; globalThis.alter2Applied=approveAlter2Changes(); globalThis.alter2AppliedDates=Object.keys(state.days||{}); globalThis.alter2AppliedPlan=state.days['2026-10-24'].plan");
+assert.match(context.alter2FinalHtml, /Final proposed changes[\s\S]*APPROVE CHANGES[\s\S]*CANCEL|Final proposed changes[\s\S]*CANCEL[\s\S]*APPROVE CHANGES/);
+assert.equal(context.alter2Applied, true, 'F. explicit approval applies the proposal');
+assert.deepEqual([...context.alter2AppliedDates], ['2026-10-24'], 'approval changes only proposed dates');
+assert.match(context.alter2AppliedPlan, /Tijuana skipped/);
+assert.equal(run("state.days['2026-09-22']"), undefined);
+
+assert.equal(run("alter2ProtectedCommitments().filter(item=>item.multiNight).map(item=>item.date).join(',')"), '2026-09-22,2026-09-23', 'G. both nights of the booking are protected');
+run("state={}; localStorage.removeItem(STORE); renderAlter2Analysis(analyseAlter2Request('Move the confirmed French Quarter accommodation.')); globalThis.alter2RedBefore=JSON.stringify(state); showAlter2FinalProposal(); globalThis.alter2RedApply=approveAlter2Changes(); globalThis.alter2RedAfter=JSON.stringify(state)");
+assert.equal(context.alter2RedApply, false);
+assert.equal(context.alter2RedAfter, context.alter2RedBefore);
+
+run("globalThis.alter2Continuity=analyseAlter2Request('Change this overnight to Parkers Crossroads.')");
+assert.equal(context.alter2Continuity.status, 'YELLOW', 'H. a changed location triggers continuity review');
+assert.ok(context.alter2Continuity.affected.length >= 2);
+assert.match(context.alter2Continuity.affected[1].reason, /Next-day origin/);
+assert.equal(context.alter2Continuity.requiresRouteVerification, true);
+
+run("state={}; localStorage.removeItem(STORE); globalThis.overnightBefore=JSON.stringify(state); beginOvernightAlter2('2026-09-06',0); globalThis.overnightAnalysis=alter2Pending; globalThis.overnightAfterAnalysis=JSON.stringify(state)");
+assert.equal(context.overnightAnalysis.kind, 'overnight', 'I. Use this stop enters Alter Trip 2.0');
+assert.equal(context.overnightAnalysis.status, 'GREEN');
+assert.equal(context.overnightAfterAnalysis, context.overnightBefore, 'overnight analysis does not write state');
+assert.match(modal.innerHTML, /Four Mile Creek State Park[\s\S]*Nothing has changed/);
+assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-09-06'))"), /beginOvernightAlter2\('2026-09-06',0\)/);
+run("showAlter2FinalProposal(); globalThis.overnightApproved=approveAlter2Changes(); globalThis.overnightSaved=state.days['2026-09-06']");
+assert.equal(context.overnightApproved, true);
+assert.match(context.overnightSaved.plan, /Suggested overnight — NOT BOOKED: Four Mile Creek State Park/);
+assert.match(context.overnightSaved.contact, /SUGGESTION — NOT BOOKED/);
+assert.equal(context.overnightSaved.status, undefined, 'selecting a suggestion never upgrades booking status');
+
+assert.equal(run("DAYS.find(day=>day.date==='2026-09-22').status"), 'CONFIRMED', 'J. first New Orleans booked night remains confirmed');
+assert.equal(run("DAYS.find(day=>day.date==='2026-09-23').status"), 'CONFIRMED', 'J. second New Orleans booked night remains confirmed');
+assert.match(run("DAYS.find(day=>day.date==='2026-09-22').plan"), /Confirmation 2026075827/);
+assert.match(run("DAYS.find(day=>day.date==='2026-09-23').plan"), /Confirmation 2026075827/);
+assert.match(html, /\.alter2-grid\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(250px,1fr\)\)/, 'Alter Trip 2.0 is responsive on desktop/tablet');
+assert.match(html, /@media\(max-width:720px\)\{\.alter2-grid\{grid-template-columns:1fr\}/, 'Alter Trip 2.0 collapses safely on phones');
+
 async function runRouteIntelligenceAsyncTests() {
   // Mapbox and planning retain minutes internally; only visible text is formatted.
   assert.equal(run('formatDrivingDuration(372)'), '6 hr 12 min');
