@@ -101,6 +101,27 @@ assert.match(modal.innerHTML, /Add this to my itinerary/);
 assert.equal(JSON.stringify(localStorage.data), beforeFind);
 assert.equal(run("mergedDays().find(d=>d.date==='2026-09-01').plan"), 'The Gallivant Times Square • Arrive / settle in • Battery Park ferry / Statue of Liberty');
 
+// Extra-night wording anchors to the requested destination stay before generic matching.
+run("state={}; localStorage.removeItem(STORE); globalThis.extraNightBeforeState=JSON.stringify(state); globalThis.extraNightBeforeDays=JSON.stringify(mergedDays()); globalThis.milwaukeeAnotherNight=analyseTripChange('Stay another night in Milwaukee.'); globalThis.milwaukeeOneMoreNight=analyseTripChange('Stay one more night in Milwaukee.'); globalThis.milwaukeeExtraDay=analyseTripChange('Add an extra day in Milwaukee.'); globalThis.extraNightAfterState=JSON.stringify(state); globalThis.extraNightAfterDays=JSON.stringify(mergedDays())");
+for (const anchored of [context.milwaukeeAnotherNight, context.milwaukeeOneMoreNight, context.milwaukeeExtraDay]) {
+  assert.ok(anchored.extraDay, 'extra night/day intent is recognised');
+  assert.equal(anchored.extraDay.name, 'MILWAUKEE');
+  assert.equal(anchored.affected[0].day.date, '2026-09-10', 'analysis starts at the Milwaukee arrival/stay');
+  assert.equal(anchored.extraDay.nextLockedIndex >= 0, true, 'analysis stops against a genuine protected commitment');
+  assert.equal(anchored.affected.at(-1).day.date, '2026-09-22', 'the next confirmed booking bounds the forward scan');
+  assert.ok(anchored.affected.every(item => item.day.date >= '2026-09-10'), 'New York, Washington, Niagara and earlier unrelated days are excluded');
+  assert.ok(anchored.affected.some(item => item.day.date === '2026-09-22' && item.label === '🔴 LOCKED'), 'the next confirmed booking remains protected');
+}
+for (const wording of ['Another night in Milwaukee.', 'One more night in Milwaukee.', 'Extra night in Milwaukee.', 'Stay an extra day in Milwaukee.']) {
+  const target = run(`extraDayTarget(mergedDays(),${JSON.stringify(wording)})`);
+  assert.equal(target.name, 'MILWAUKEE', `${wording} identifies Milwaukee before scanning`);
+  assert.equal(target.start, 9, `${wording} anchors to 10 Sep, the start of the contiguous Milwaukee run`);
+  assert.equal(target.end, 13, `${wording} includes the contiguous Milwaukee stay through 14 Sep`);
+}
+assert.equal(context.extraNightAfterState, context.extraNightBeforeState, 'extra-night analysis does not mutate itinerary state');
+assert.equal(context.extraNightAfterDays, context.extraNightBeforeDays, 'extra-night analysis does not change merged itinerary data');
+assert.equal(localStorage.getItem('dwajp-trip-v5'), null, 'extra-night analysis does not persist before approval');
+
 // Stage 2 Change My Trip analyses multiple itinerary days without modifying state.
 const beforeAnalysis = JSON.stringify(localStorage.data);
 run("globalThis.milwaukeeAnalysis=analyseTripChange(\"We don't need to get to Milwaukee until later on Friday and we can leave earlier on Monday.\"); renderTripImpact(\"We don't need to get to Milwaukee until later on Friday and we can leave earlier on Monday.\");");
@@ -391,6 +412,188 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(run('formatDrivingDuration(394)'), '6 hr 34 min');
   assert.equal(run('formatDrivingDuration(60)'), '1 hr');
   assert.equal(run('formatDrivingDuration(45)'), '45 min');
+
+  // Alter Trip 2.0 final review gates approval on every changed route leg.
+  run("state={}; localStorage.removeItem(STORE); globalThis.reviewAnalysis=analyseAlter2Request('Stay another night in Milwaukee.'); renderAlter2Analysis(globalThis.reviewAnalysis); globalThis.pendingStateBefore=JSON.stringify(state); globalThis.pendingStorageBefore=JSON.stringify(localStorage.data); globalThis.pendingRouteResolvers=[]; RouteIntelligence.setProvider({routeAsync(){return new Promise(resolve=>globalThis.pendingRouteResolvers.push(resolve))}}); showAlter2FinalProposal(); globalThis.pendingReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.pendingApply=approveAlter2Changes()");
+  assert.match(context.pendingReviewHtml, /ROUTE CHECKING/);
+  assert.match(context.pendingReviewHtml, /id="alter2ApproveButton"[\s\S]*disabled/);
+  assert.equal(context.pendingApply, false, 'approval is blocked while route verification is pending');
+  assert.equal(run('JSON.stringify(state)'), context.pendingStateBefore);
+  assert.equal(JSON.stringify(localStorage.data), context.pendingStorageBefore, 'route checking does not mutate localStorage');
+
+  run("globalThis.failedReview=analyseAlter2Request('Stay another night in Milwaukee.'); globalThis.failedReviewBefore=JSON.stringify(state); globalThis.failedStorageBefore=JSON.stringify(localStorage.data); globalThis.failedRouteIntelligence={async resolveAsync(){return {reliable:false,status:'route_confirmation_required'}}}");
+  const failedReview = await run('verifyAlter2Routes(globalThis.failedReview,{routeIntelligence:globalThis.failedRouteIntelligence})');
+  assert.equal(failedReview.status, 'failed');
+  assert.equal(run('alter2RouteCheckReady(globalThis.failedReview)'), false);
+  assert.match(run('renderAlter2RouteVerification(globalThis.failedReview)'), /DISTANCE TO VERIFY \/ ROUTE VERIFICATION REQUIRED/);
+  assert.equal(run('JSON.stringify(state)'), context.failedReviewBefore);
+  assert.equal(JSON.stringify(localStorage.data), context.failedStorageBefore, 'failed verification remains read-only');
+
+  run("globalThis.verifiedReview=analyseAlter2Request('Stay another night in Milwaukee.'); globalThis.verifiedReviewBefore=JSON.stringify(state); globalThis.verifiedStorageBefore=JSON.stringify(localStorage.data); globalThis.reviewRouteCalls=[]; globalThis.verifiedRouteIntelligence={async resolveAsync({origin,destination}){globalThis.reviewRouteCalls.push(origin.label+' -> '+destination.label);return {reliable:true,distanceKm:destination.key==='bloomington'?324.7:688.4,durationMinutes:destination.key==='bloomington'?203:394,origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}}}");
+  const verifiedReview = await run('verifyAlter2Routes(globalThis.verifiedReview,{routeIntelligence:globalThis.verifiedRouteIntelligence})');
+  assert.equal(verifiedReview.status, 'verified');
+  assert.equal(verifiedReview.legs.length, 2, 'every changed Milwaukee travel-chain leg is verified');
+  assert.deepEqual(Array.from(context.reviewRouteCalls), ['Milwaukee, Wisconsin -> Bloomington, Illinois', 'Bloomington, Illinois -> Nashville, Tennessee']);
+  assert.equal(run('alter2RouteCheckReady(globalThis.verifiedReview)'), true, `approval is enabled only after all required legs verify: ${JSON.stringify({validation:context.verifiedReview.proposalValidation,safety:context.verifiedReview.routeSafety,verification:context.verifiedReview.routeVerification})}`);
+  const verifiedReviewHtml = run('renderAlter2RouteVerification(globalThis.verifiedReview)');
+  assert.match(verifiedReviewHtml, /Milwaukee → Bloomington[\s\S]*324\.7 km[\s\S]*3 hr 23 min[\s\S]*VERIFIED[\s\S]*(GREEN|YELLOW|RED)/);
+  assert.match(verifiedReviewHtml, /Bloomington → Nashville[\s\S]*688\.4 km[\s\S]*6 hr 34 min[\s\S]*VERIFIED/);
+  run("alter2Pending=globalThis.verifiedReview; showAlter2FinalProposal(); globalThis.verifiedFinalHtml=document.getElementById('alterModal').innerHTML");
+  assert.doesNotMatch(context.verifiedFinalHtml, /id="alter2ApproveButton"[^>]*disabled/, 'the final button is enabled after every route succeeds');
+  assert.match(context.verifiedFinalHtml, /ROUTES VERIFIED: all changed driving legs have been checked\./, 'the completed review replaces the checking banner');
+  assert.doesNotMatch(context.verifiedFinalHtml, /ROUTE CHECKING/, 'no pending banner remains after all routes verify');
+  assert.doesNotMatch(context.verifiedFinalHtml, /REQUIRES ROUTE VERIFICATION/, 'verified changed-day cards remove stale verification placeholders');
+  assert.match(context.verifiedFinalHtml, /Tue 15 Sep[\s\S]*ROUTE:[\s\S]*Milwaukee → Bloomington[\s\S]*324\.7 km[\s\S]*3 hr 23 min[\s\S]*VERIFIED[\s\S]*DAY PRESSURE:[\s\S]*GREEN/);
+  assert.match(context.verifiedFinalHtml, /Wed 16 Sep[\s\S]*ROUTE:[\s\S]*Bloomington → Nashville[\s\S]*688\.4 km[\s\S]*6 hr 34 min[\s\S]*VERIFIED[\s\S]*DAY PRESSURE:[\s\S]*YELLOW/);
+  assert.equal(run('JSON.stringify(state)'), context.verifiedReviewBefore);
+  assert.equal(JSON.stringify(localStorage.data), context.verifiedStorageBefore, 'verified review does not mutate localStorage before approval');
+
+  // Approval persists the exact verified route snapshots into only their mapped
+  // itinerary days; it does not call the route provider again after approval.
+  run("alter2Pending=globalThis.verifiedReview; globalThis.routeCallsBeforeApproval=globalThis.reviewRouteCalls.length; globalThis.verifiedApprovalApplied=approveAlter2Changes(); globalThis.approvedTuesday=mergedDays().find(day=>day.date==='2026-09-15'); globalThis.approvedWednesday=mergedDays().find(day=>day.date==='2026-09-16'); globalThis.approvedTuesdayCard=dayCard(globalThis.approvedTuesday); globalThis.approvedWednesdayCard=dayCard(globalThis.approvedWednesday)");
+  assert.equal(context.verifiedApprovalApplied, true);
+  assert.equal(context.reviewRouteCalls.length, context.routeCallsBeforeApproval, 'approval reuses verified route objects without another route request');
+  assert.equal(context.approvedTuesday.verifiedRoute.distanceKm, 324.7);
+  assert.equal(context.approvedTuesday.verifiedRoute.durationMinutes, 203);
+  assert.equal(context.approvedTuesday.verifiedRoute.pressure, 'GREEN');
+  assert.equal(context.approvedWednesday.verifiedRoute.distanceKm, 688.4);
+  assert.equal(context.approvedWednesday.verifiedRoute.durationMinutes, 394);
+  assert.equal(context.approvedWednesday.verifiedRoute.pressure, 'YELLOW');
+  assert.match(context.approvedTuesdayCard, /MILWAUKEE → BLOOMINGTON[\s\S]*324\.7 km[\s\S]*3 hr 23 min[\s\S]*VERIFIED[\s\S]*Route pressure: GREEN/);
+  assert.match(context.approvedWednesdayCard, /BLOOMINGTON → NASHVILLE[\s\S]*688\.4 km[\s\S]*6 hr 34 min[\s\S]*VERIFIED[\s\S]*Route pressure: YELLOW/);
+  assert.doesNotMatch(context.approvedTuesdayCard + context.approvedWednesdayCard, /435 km|REQUIRES ROUTE VERIFICATION/);
+  assert.equal(run("state.days['2026-09-22']"), undefined, 'confirmed New Orleans booking is untouched by Milwaukee approval');
+  assert.equal(run("JSON.parse(localStorage.getItem(STORE)).days['2026-09-15'].verifiedRoute.distanceKm"), 324.7, 'verified route survives persistence');
+
+  // Each later command derives its location from its own wording and the
+  // currently approved itinerary, never from the previous Alter Trip request.
+  run("globalThis.afterMilwaukeeState=JSON.stringify(state); globalThis.afterMilwaukeeStorage=JSON.stringify(localStorage.data); globalThis.stalePreviousAnalysis=globalThis.verifiedReview; alter2Pending=globalThis.stalePreviousAnalysis; globalThis.nashvilleFresh=analyseAlter2Request('Stay one extra night in Nashville'); globalThis.afterNashvilleAnalysisState=JSON.stringify(state); globalThis.afterNashvilleAnalysisStorage=JSON.stringify(localStorage.data)");
+  assert.equal(context.nashvilleFresh.target, '2026-09-16', 'the current Nashville arrival is the new command anchor');
+  assert.equal(context.nashvilleFresh.affected[0].date, '2026-09-16');
+  assert.equal(context.nashvilleFresh.affected.at(-1).date, '2026-09-22', 'analysis scans to the next genuine protected commitment');
+  assert.ok(context.nashvilleFresh.affected.every(item => item.date >= '2026-09-16'), 'earlier Milwaukee days are excluded');
+  assert.match(context.nashvilleFresh.summary, /extra night in nashville/i);
+  assert.equal(context.nashvilleFresh.request, 'Stay one extra night in Nashville');
+  assert.equal(context.nashvilleFresh.routeVerification, undefined, 'previous route verification state is not inherited');
+  assert.ok(context.nashvilleFresh.routeLegs.length > 0, 'shifted driving legs enter the existing verification stage');
+  assert.equal(context.nashvilleFresh.proposalValidation.valid, true, 'the completed Nashville sequence is coherent before review');
+  assert.deepEqual(Array.from(context.nashvilleFresh.changes.map(change => change.date)), ['2026-09-18', '2026-09-19', '2026-09-20', '2026-09-21']);
+  const nashvilleExtraDay = context.nashvilleFresh.changes[0].changes;
+  const memphisTravelDay = context.nashvilleFresh.changes[1].changes;
+  const bristolDay = context.nashvilleFresh.changes[2].changes;
+  const newOrleansApproach = context.nashvilleFresh.changes[3].changes;
+  assert.equal(nashvilleExtraDay.dest.toLowerCase(), 'nashville');
+  assert.match(nashvilleExtraDay.plan, /extra night in nashville/i);
+  assert.match(nashvilleExtraDay.contact, /Nashville/i);
+  assert.doesNotMatch(nashvilleExtraDay.contact, /Memphis/i, 'the extra Nashville day does not inherit the stale Memphis contact');
+  assert.match(nashvilleExtraDay.dest_query, /Nashville/i);
+  assert.match(memphisTravelDay.dest, /NASHVILLE → MEMPHIS → BRISTOL/i);
+  assert.match(memphisTravelDay.plan, /Memphis[\s\S]*GRACELAND[\s\S]*Bristol/i);
+  assert.match(memphisTravelDay.contact, /Graceland|Memphis/i);
+  assert.match(memphisTravelDay.dest_query, /Bristol/i, 'the multi-stop day queries its final overnight destination');
+  assert.equal(bristolDay.dest.toLowerCase(), 'bristol');
+  assert.match(bristolDay.plan, /Bristol|Night Race/i);
+  assert.match(bristolDay.contact, /Bristol Motor Speedway/i);
+  assert.match(bristolDay.dest_query, /Bristol/i);
+  assert.doesNotMatch(bristolDay.dest_query, /Memphis/i, 'the shifted Bristol day does not retain its stale original query');
+  assert.match(newOrleansApproach.dest, /BRISTOL → NEW ORLEANS/i);
+  assert.match(newOrleansApproach.dest_query, /New Orleans/i);
+  assert.deepEqual(Array.from(context.nashvilleFresh.routeLegs.map(leg => `${leg.origin} -> ${leg.destination}`)), ['NASHVILLE -> MEMPHIS', 'MEMPHIS -> BRISTOL', 'BRISTOL -> NEW ORLEANS'], 'route legs come from the reconstructed proposed sequence');
+  assert.equal(run("state.days['2026-09-22']"), undefined, 'the protected New Orleans booking remains outside proposal writes');
+  assert.match(run('renderAlter2ChangeRows(globalThis.nashvilleFresh)'), /Fri 18 Sep — nashville/i, 'review headings display the proposed day rather than the stale current route');
+  assert.equal(context.afterNashvilleAnalysisState, context.afterMilwaukeeState, 'Nashville impact analysis does not mutate approved itinerary state');
+  assert.equal(context.afterNashvilleAnalysisStorage, context.afterMilwaukeeStorage, 'Nashville impact analysis does not write localStorage');
+  assert.equal(run("state.days['2026-09-15'].verifiedRoute.distanceKm"), 324.7, 'approved Milwaukee route data remains present');
+  assert.equal(run("state.days['2026-09-16'].verifiedRoute.distanceKm"), 688.4, 'approved Milwaukee downstream route remains present');
+
+  run("globalThis.nashvilleRouteCalls=[]; globalThis.nashvilleRouteIntelligence={async resolveAsync({origin,destination}){globalThis.nashvilleRouteCalls.push({origin,destination});let key=origin.key+'>'+destination.key,values={'nashville>memphis':[332.4,190],'memphis>bristol':[799.1,453],'bristol>new orleans':[1128.3,635],'memphis>birmingham':[370.2,210],'birmingham>new orleans':[538.7,291],'bristol>birmingham':[591.4,339]}[key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  const nashvilleRouteStatus = await run("verifyAlter2Routes(globalThis.nashvilleFresh,{routeIntelligence:globalThis.nashvilleRouteIntelligence})");
+  assert.equal(nashvilleRouteStatus.status, 'verified');
+  assert.deepEqual(Array.from(nashvilleRouteStatus.legs.map(leg => [leg.origin, leg.destination, leg.distanceKm, leg.durationMinutes, leg.pressure])), [['NASHVILLE','MEMPHIS',332.4,190,'GREEN'],['MEMPHIS','BRISTOL',799.1,453,'YELLOW'],['BRISTOL','NEW ORLEANS',1128.3,635,'RED']]);
+  assert.deepEqual(Array.from(context.nashvilleRouteCalls.slice(0,3).map(call => [call.origin.key, call.destination.key])), [['nashville','memphis'],['memphis','bristol'],['bristol','new orleans']], 'base proposal legs use validated registry coordinates through the existing route provider');
+  assert.equal(context.nashvilleRouteCalls.some(call => call.origin.key === 'nashville' && call.destination.key === 'bristol'), false, 'a direct Nashville/Bristol route is never substituted for the Memphis stop');
+  assert.equal(run('alter2RouteCheckReady(globalThis.nashvilleFresh)'), false, 'verified but extreme RED driving days remain blocked');
+  assert.equal(memphisTravelDay.verifiedRoute.distanceKm, 1131.5, 'multi-stop verified legs aggregate onto the correct Memphis/Bristol proposed day');
+  assert.equal(memphisTravelDay.verifiedRoute.durationMinutes, 643);
+  assert.equal(memphisTravelDay.verifiedRoute.pressure, 'RED');
+  assert.deepEqual(Array.from(memphisTravelDay.verifiedRoute.routeSequence), ['NASHVILLE','MEMPHIS','BRISTOL']);
+  assert.deepEqual(Array.from(memphisTravelDay.verifiedRoute.legs.map(leg => `${leg.origin} -> ${leg.destination}`)), ['NASHVILLE -> MEMPHIS','MEMPHIS -> BRISTOL']);
+  assert.equal(newOrleansApproach.verifiedRoute.distanceKm, 1128.3, 'the Bristol/New Orleans result maps to the approach day');
+  assert.equal(newOrleansApproach.verifiedRoute.durationMinutes, 635);
+  assert.equal(newOrleansApproach.verifiedRoute.pressure, 'RED');
+  const nashvilleReviewHtml = run('renderAlter2ChangeRows(globalThis.nashvilleFresh)');
+  assert.match(nashvilleReviewHtml, /NASHVILLE → MEMPHIS[\s\S]*332\.4 km[\s\S]*3 hr 10 min[\s\S]*VERIFIED[\s\S]*GREEN/);
+  assert.match(nashvilleReviewHtml, /MEMPHIS → BRISTOL[\s\S]*799\.1 km[\s\S]*7 hr 33 min[\s\S]*VERIFIED[\s\S]*YELLOW/);
+  assert.match(nashvilleReviewHtml, /TOTAL DRIVING:[\s\S]*1131\.5 km[\s\S]*10 hr 43 min[\s\S]*DAY PRESSURE:[\s\S]*RED/);
+  assert.doesNotMatch(nashvilleReviewHtml, /VERIFIED ROUTE:[\s\S]*NASHVILLE → BRISTOL/);
+  assert.doesNotMatch(nashvilleReviewHtml, /DEST_QUERY:|ROUTE_MAPS:|MAPS:/, 'traveller review hides internal routing fields');
+  assert.match(nashvilleReviewHtml, /Nashville Visitor Center<br>/, 'contact line breaks render as line breaks');
+  assert.match(run('alter2ReviewBanner(globalThis.nashvilleFresh).text'), /RED DRIVING DAY[\s\S]*buffer day[\s\S]*split the leg/i);
+  assert.equal(context.nashvilleFresh.repairStatus, 'ready', 'RED proposal automatically triggers repair generation');
+  assert.equal(context.nashvilleFresh.repairs.length, 3);
+  const bufferRepair = context.nashvilleFresh.repairs.find(option => option.id === 'use-buffer');
+  const overnightRepair = context.nashvilleFresh.repairs.find(option => option.id === 'insert-overnight');
+  const keepOriginalRepair = context.nashvilleFresh.repairs.find(option => option.id === 'keep-original');
+  assert.equal(bufferRepair.viable, true, 'a safe buffer repair is generated when flexible days are available');
+  assert.deepEqual(Array.from(bufferRepair.legs.map(leg => [leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['NASHVILLE','MEMPHIS',332.4,190,'GREEN'],['MEMPHIS','Birmingham',370.2,210,'GREEN'],['Birmingham','NEW ORLEANS',538.7,291,'YELLOW']]);
+  assert.ok(bufferRepair.legs.every(leg => leg.verification === 'verified' && leg.pressure !== 'RED'), 'every repair leg verifies and recalculates below RED');
+  assert.match(bufferRepair.optionalImpact, /OPTIONAL stop removed: BRISTOL/i, 'optional removal is disclosed');
+  assert.match(bufferRepair.mustImpact, /MUST Graceland.*preserved/i, 'MUST priority is retained');
+  assert.equal(run("lookupLocationCoordinates('Birmingham').status"), 'validated', 'inserted overnight is a validated real city');
+  assert.match(bufferRepair.changes.find(change => /NASHVILLE → MEMPHIS/i.test(change.changes.dest)).changes.plan, /GRACELAND/i, 'repair keeps the Graceland plan on its verified day');
+  assert.equal(bufferRepair.changes.find(change => /NASHVILLE → MEMPHIS/i.test(change.changes.dest)).changes.status, 'MUST DO', 'MUST status moves with Graceland');
+  assert.match(bufferRepair.changes.find(change => /MEMPHIS → Birmingham/i.test(change.changes.dest)).changes.contact, /Birmingham, Alabama[\s\S]*SUGGESTION — NOT BOOKED/);
+  assert.match(bufferRepair.changes[0].changes.plan, /extra night in nashville/i, 'selected repair includes the requested extra Nashville night');
+  assert.equal(bufferRepair.changes[0].changes.status, 'PLANNED', 'extra Nashville local night does not inherit the shifted MUST status');
+  assert.equal(bufferRepair.changes.some(change => change.date === '2026-09-22'), false, 'repair never writes the protected New Orleans day');
+  assert.equal(overnightRepair.viable, false, 'retaining Bristol plus an inserted overnight cannot fit before the protected commitment');
+  assert.ok(overnightRepair.legs.every(leg => leg.verification === 'verified' && leg.pressure !== 'RED'), 'even the non-viable timing option shows verified component legs');
+  assert.match(overnightRepair.failureReason, /cannot fit[\s\S]*protected booking day/i);
+  assert.equal(keepOriginalRepair.viable, true);
+  const repairHtml = run('renderAlter2RepairOptions(globalThis.nashvilleFresh)');
+  assert.match(repairHtml, /RED DRIVING CONFLICT[\s\S]*OPTION 1[\s\S]*RECOMMENDED[\s\S]*OPTIONAL stop removed: BRISTOL[\s\S]*OPTION 2[\s\S]*NOT SAFE TO APPLY[\s\S]*OPTION 3 — KEEP ORIGINAL/i);
+  assert.doesNotMatch(repairHtml, /overflow-x|white-space:\s*nowrap/i, 'repair cards retain natural responsive wrapping');
+  assert.match(html, /#alterModal \.btn\{min-height:44px/);
+  assert.match(html, /@media\(max-width:720px\)[\s\S]*\.alter2-grid\{grid-template-columns:1fr\}/, 'phone repair cards stack naturally');
+  assert.equal(run('alter2ApprovalReady(globalThis.nashvilleFresh)'), false, 'unrepaired RED proposal has no approval path');
+  run("alter2Pending=globalThis.nashvilleFresh; globalThis.bufferRepairIndex=globalThis.nashvilleFresh.repairs.findIndex(option=>option.id==='use-buffer'); globalThis.repairSelected=selectAlter2Repair(globalThis.bufferRepairIndex); globalThis.selectedRepairReady=alter2ApprovalReady(globalThis.nashvilleFresh); globalThis.stateAfterRepairSelection=JSON.stringify(state); globalThis.storageAfterRepairSelection=JSON.stringify(localStorage.data); delete globalThis.nashvilleFresh.selectedRepairIndex");
+  assert.equal(context.repairSelected, true);
+  assert.equal(context.selectedRepairReady, true, 'only a selected fully verified repair exposes approval readiness');
+  assert.equal(context.stateAfterRepairSelection, context.afterMilwaukeeState, 'repair selection does not mutate itinerary state');
+  assert.equal(context.storageAfterRepairSelection, context.afterMilwaukeeStorage, 'repair selection does not write localStorage');
+  run("alter2Pending=globalThis.nashvilleFresh; globalThis.extremeNashvilleApply=approveAlter2Changes()");
+  assert.equal(context.extremeNashvilleApply, false, 'an extreme verified route cannot be approved silently');
+  assert.equal(run('JSON.stringify(state)'), context.afterMilwaukeeState);
+  assert.equal(JSON.stringify(localStorage.data), context.afterMilwaukeeStorage);
+
+  run("globalThis.mismatchedNashville=analyseAlter2Request('Stay one extra night in Nashville'); globalThis.mismatchedNashville.changes[1].changes.dest='NASHVILLE → BRISTOL'");
+  await run("verifyAlter2Routes(globalThis.mismatchedNashville,{routeIntelligence:globalThis.nashvilleRouteIntelligence})");
+  assert.equal(context.mismatchedNashville.proposalValidation.valid, false, 'displayed route/component mismatch invalidates the proposal');
+  assert.match(run('alter2ReviewBanner(globalThis.mismatchedNashville).text'), /displayed route does not match verified component legs/);
+  assert.equal(run('alter2RouteCheckReady(globalThis.mismatchedNashville)'), false, 'route/day mismatch blocks approval');
+
+  run("globalThis.failedNashville=analyseAlter2Request('Stay one extra night in Nashville'); globalThis.oneFailedRouteIntelligence={async resolveAsync({origin,destination}){if(origin.key==='memphis'&&destination.key==='bristol')return {reliable:false};return {reliable:true,distanceKm:300,durationMinutes:180,origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}}}");
+  const oneFailedStatus = await run("verifyAlter2Routes(globalThis.failedNashville,{routeIntelligence:globalThis.oneFailedRouteIntelligence})");
+  assert.equal(oneFailedStatus.status, 'failed');
+  assert.equal(run('alter2RouteCheckReady(globalThis.failedNashville)'), false);
+  run("alter2Pending=globalThis.failedNashville; globalThis.nashvilleApplyBlocked=approveAlter2Changes()");
+  assert.equal(context.nashvilleApplyBlocked, false, 'one failed route keeps approval blocked');
+  assert.equal(run('JSON.stringify(state)'), context.afterMilwaukeeState);
+  assert.equal(JSON.stringify(localStorage.data), context.afterMilwaukeeStorage);
+
+  run("globalThis.invalidProposal=analyseAlter2Request('Stay one extra night in Nashville'); globalThis.invalidProposal.changes[0].changes.dest_query='Unrelated location'; globalThis.invalidProposal.proposalValidation=alter2ValidateProposal(globalThis.invalidProposal.changes); alter2Pending=globalThis.invalidProposal; globalThis.invalidApply=approveAlter2Changes()");
+  assert.equal(context.invalidProposal.proposalValidation.valid, false);
+  assert.match(run('alter2ReviewBanner(globalThis.invalidProposal).text'), /INVALID PROPOSAL/);
+  assert.equal(context.invalidApply, false, 'inconsistent proposed-day objects cannot be approved');
+  assert.equal(run('JSON.stringify(state)'), context.afterMilwaukeeState);
+  assert.equal(JSON.stringify(localStorage.data), context.afterMilwaukeeStorage);
+
+  run("globalThis.beforeThirdAnalysis=JSON.stringify(state); globalThis.thirdFresh=analyseAlter2Request('Stay one extra night in Yellowstone'); globalThis.afterThirdAnalysis=JSON.stringify(state)");
+  assert.equal(context.thirdFresh.target, '2026-10-13', 'a third unrelated request derives Yellowstone afresh');
+  assert.equal(context.thirdFresh.affected[0].date, '2026-10-13');
+  assert.ok(context.thirdFresh.affected.every(item => item.date >= '2026-10-13'));
+  assert.equal(context.afterThirdAnalysis, context.beforeThirdAnalysis, 'third-location impact analysis is also read-only');
+
   context.mockMapboxFetch = async (url, options) => {
     context.mockMapboxRequest = { url, options };
     return {
@@ -441,11 +644,44 @@ async function runRouteIntelligenceAsyncTests() {
   // from itinerary overrides/localStorage.
   const ortonville = run("lookupLocationCoordinates('ORTONVILLE, MI')");
   const indianaDunes = run("lookupLocationCoordinates('Indiana Dunes area, Indiana')");
+  const memphis = run("lookupLocationCoordinates('Memphis, TN')");
+  const bristol = run("lookupLocationCoordinates('Bristol, TN')");
+  const newOrleans = run("lookupLocationCoordinates('New Orleans, LA')");
+  const centralCoast = run("lookupLocationCoordinates('Central Coast')");
+  const ambiguousPlace = run("lookupLocationCoordinates('Texas Hill Country')");
   const unknownPlace = run("lookupLocationCoordinates('Unmapped overnight stop')");
   assert.equal(ortonville.status, 'validated');
   assert.deepEqual(Array.from(ortonville.coordinates), [-83.443, 42.852251]);
   assert.equal(indianaDunes.status, 'validated', 'a suggested overnight area can be resolved even when it is absent from the original itinerary day');
+  assert.deepEqual(Array.from(memphis.coordinates), [-89.9685113, 35.1091639]);
+  assert.deepEqual(Array.from(bristol.coordinates), [-82.2170009, 36.5585486]);
+  assert.deepEqual(Array.from(newOrleans.coordinates), [-89.9345018, 30.0528765]);
+  assert.equal(centralCoast.status, 'validated');
+  assert.equal(centralCoast.label, 'Pismo Beach, California', 'the itinerary route URL disambiguates its Central Coast endpoint');
+  assert.equal(ambiguousPlace.status, 'ambiguous');
+  assert.equal(ambiguousPlace.coordinates, null, 'ambiguous itinerary regions never receive guessed coordinates');
   assert.equal(unknownPlace.status, 'unavailable');
+  assert.equal(unknownPlace.coordinates, null, 'unknown locations never receive invented coordinates');
+  assert.equal(run("drivingRouteInput({dest:'Central Coast → Unmapped overnight stop'}).available"), false);
+  const requiredRegistryNames = ['Amarillo','Palo Duro Canyon','Disneyland','Elko','Gallup','Grand Canyon','Las Vegas','Los Angeles','Missoula','NYC','Niagara Falls','San Diego','San Francisco','Santa Monica','Washington D.C.','Yellowstone','Yosemite'];
+  requiredRegistryNames.forEach(name => assert.equal(run(`lookupLocationCoordinates(${JSON.stringify(name)}).status`), 'validated', `${name} has one explicit validated endpoint`));
+  assert.equal(run("lookupLocationCoordinates('Amarillo, Texas').label"), 'Amarillo, Texas');
+  assert.equal(run("lookupLocationCoordinates('Everett, Washington').label"), 'Everett, Washington');
+  assert.equal(run("lookupLocationCoordinates('New York City, New York').label"), 'New York City, New York');
+  assert.equal(run("lookupLocationCoordinates('Travel / Buffer').status"), 'non-geographic');
+  assert.equal(run("lookupLocationCoordinates('RV Return').status"), 'non-geographic');
+  assert.equal(run("lookupLocationCoordinates('New Orleans / Buffer').label"), 'New Orleans, Louisiana');
+  assert.equal(run("lookupLocationCoordinates('Seattle / Everett').label"), 'Everett, Washington (Seattle local excursion)');
+  assert.equal(run("lookupLocationCoordinates('San Diego / Tijuana Optional').label"), 'San Diego, California (Tijuana optional excursion)');
+  const itineraryCoverage = run('auditItineraryLocationCoverage(DAYS)');
+  assert.ok(itineraryCoverage.resolvable.some(item => item.name === 'NASHVILLE'));
+  assert.ok(itineraryCoverage.resolvable.some(item => item.name === 'MEMPHIS'));
+  assert.ok(itineraryCoverage.resolvable.some(item => item.name === 'BRISTOL'));
+  assert.ok(itineraryCoverage.resolvable.some(item => item.name === 'NEW ORLEANS'));
+  assert.ok(itineraryCoverage.resolvable.some(item => item.name === 'CENTRAL COAST'));
+  assert.ok(itineraryCoverage.resolvable.some(item => item.name === 'YELLOWSTONE'));
+  assert.ok(itineraryCoverage.ambiguous.some(item => item.name === 'TEXAS HILL COUNTRY'), 'the audit does not invent a precise Texas Hill Country stop');
+  assert.ok(itineraryCoverage.nonGeographic.some(item => item.name === 'TRAVEL / BUFFER'));
 
   // Route-aware analysis is asynchronous and read-only. A verified long leg is
   // yellow with a halfway suggestion; provider failure and locked days stay safe.
@@ -459,7 +695,7 @@ async function runRouteIntelligenceAsyncTests() {
   assert.match(verifiedAssessment.reason, /720 km/);
   assert.match(verifiedAssessment.solution, /Indiana Dunes area, Indiana/, 'a validated planned stop can be suggested');
   assert.doesNotMatch(verifiedAssessment.solution, /Halfway Town|Street|Avenue/i, 'arbitrary Mapbox waypoint names are never presented as overnight locations');
-  assert.match(run("routeImpactSummary({dest:'ALPHA → BETA',detour:''},{reliable:true,distanceKm:720,durationMinutes:540,origin:{label:'Alpha'},destination:{label:'Beta'},waypoints:[{name:'North Milwaukee Street'}]}).solution"), /still needs to be identified and validated/i, 'without a validated candidate, the UI does not invent an overnight stop');
+  assert.match(run("routeImpactSummary({dest:'ALPHA → BETA',detour:''},{reliable:true,distanceKm:720,durationMinutes:540,origin:{label:'Alpha'},destination:{label:'Beta'},waypoints:[{name:'North Milwaukee Street'}]}).solution"), /buffer day[\s\S]*split the leg[\s\S]*leave the itinerary unchanged/i, 'without a validated candidate, the UI offers safe generic choices instead of inventing an overnight stop');
   assert.deepEqual(JSON.parse(JSON.stringify(context.registryRouteCalls[0].origin.coordinates)), [-83.443, 42.852251], 'the Worker provider receives registry coordinates');
   assert.deepEqual(JSON.parse(JSON.stringify(context.registryRouteCalls[0].destination.coordinates)), [-87.9065, 43.0389]);
   const suggestedRoute = await run("RouteIntelligence.resolveAsync({origin:lookupLocationCoordinates('Ortonville'),destination:lookupLocationCoordinates('Indiana Dunes'),days:[]})");

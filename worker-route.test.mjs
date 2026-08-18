@@ -42,6 +42,13 @@ response = await handleRouteRequest(request(validPayload), {});
 assert.equal(response.status, 503);
 assert.equal((await response.json()).code, 'routing_disabled');
 
+response = await handleRouteRequest(request({ origin: 'Unknown origin', destination: 'Ambiguous destination' }), liveEnv, async () => { throw new Error('must not route labels without validated coordinates'); });
+assert.equal(response.status, 422);
+const unresolvedBody = await response.json();
+assert.equal(unresolvedBody.verification, 'route_confirmation_required');
+assert.equal(unresolvedBody.code, 'coordinates_required');
+assert.equal(unresolvedBody.roadDistanceKm, undefined, 'the Worker never invents a fallback distance');
+
 // Mock-only response normalization: no internet request or real credential is needed.
 const standardized = standardiseMapboxRoute(mapboxRoute, validateRoutePayload(validPayload));
 assert.equal(standardized.verification, 'verified');
