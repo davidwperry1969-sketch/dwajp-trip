@@ -1,0 +1,61 @@
+name: Patch booking website button
+
+on:
+  push:
+    branches:
+      - feature/booking-website-button
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/booking-website-button
+      - name: Add website open button to booking form
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('bookings-v2.js')
+          s=p.read_text()
+          old='<div class="field booking-wide"><label>Website</label><input id="bookingWebsite" value="${esc(b.website||\'\')}" placeholder="https://…"></div>'
+          new='<div class="field booking-wide"><label>Website</label><div class="booking-website-row"><input id="bookingWebsite" value="${esc(b.website||\'\')}" placeholder="https://…" oninput="refreshBookingWebsiteButton()"><button id="bookingWebsiteOpen" class="btn light" type="button" onclick="openBookingWebsite()">🌐 OPEN WEBSITE</button></div></div>'
+          if old not in s:
+              raise SystemExit('website form target not found')
+          s=s.replace(old,new)
+          anchor="globalThis.closeBookingForm=closeBookingForm;"
+          add="globalThis.closeBookingForm=closeBookingForm;function refreshBookingWebsiteButton(){let input=document.getElementById('bookingWebsite'),btn=document.getElementById('bookingWebsiteOpen'),url=safeUrl(input&&input.value);if(btn){btn.disabled=!url;btn.style.display=url?'inline-flex':'none'}}globalThis.refreshBookingWebsiteButton=refreshBookingWebsiteButton;function openBookingWebsite(){let input=document.getElementById('bookingWebsite'),url=safeUrl(input&&input.value);if(!url){alert('No website has been found yet.');return}window.open(url,'_blank','noopener')}globalThis.openBookingWebsite=openBookingWebsite;"
+          if anchor not in s:
+              raise SystemExit('close form anchor not found')
+          s=s.replace(anchor,add,1)
+          old2="setValue('bookingWebsite',website);if(status)status.textContent=`Found: ${name||address}. Check the details below before saving.`"
+          new2="setValue('bookingWebsite',website);refreshBookingWebsiteButton();if(status)status.textContent=`Found: ${name||address}. Check the details below before saving.`"
+          if old2 not in s:
+              raise SystemExit('find fill website target not found')
+          s=s.replace(old2,new2,1)
+          css_anchor='.booking-helper-row .btn{flex:1}.booking-filter{align-items:stretch;flex-direction:column}'
+          css_new='.booking-helper-row .btn{flex:1}.booking-website-row{display:flex;gap:8px;align-items:center}.booking-website-row input{flex:1}.booking-website-row .btn{white-space:nowrap}.booking-filter{align-items:stretch;flex-direction:column}'
+          if css_anchor not in s:
+              raise SystemExit('mobile css target not found')
+          s=s.replace(css_anchor,css_new,1)
+          p.write_text(s)
+
+          t=Path('bookings-v2.test.js')
+          ts=t.read_text()
+          marker="assert.match(code,/FIND & FILL DETAILS/);"
+          replacement="assert.match(code,/FIND & FILL DETAILS/);assert.match(code,/OPEN WEBSITE/,'booking form offers one-tap website button');assert.match(code,/openBookingWebsite/);assert.match(code,/refreshBookingWebsiteButton/);"
+          if marker not in ts:
+              raise SystemExit('test marker not found')
+          ts=ts.replace(marker,replacement,1)
+          t.write_text(ts)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bookings-v2.js bookings-v2.test.js
+          git commit -m "Add one-tap website button to booking form"
+          git push origin HEAD:feature/booking-website-button
