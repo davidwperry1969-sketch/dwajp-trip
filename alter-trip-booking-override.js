@@ -1,103 +1,11 @@
-/* DWAJP TRIP — Alter Trip confirmed-booking override helper
- * Confirmed means protected, not permanently frozen.
- * This module does NOT alter itinerary data itself. It only manages the
- * deliberate override state and marks affected bookings as needing change.
- */
-(function (root) {
-  'use strict';
-
-  const OVERRIDE_KEY = 'dwajpAlterTripBookingOverride';
-
-  function normaliseBooking(b) {
-    return {
-      id: b && (b.id || b.bookingId || b.ref) || '',
-      name: b && (b.name || b.title || b.place || b.provider) || 'Confirmed booking',
-      startDate: b && (b.startDate || b.fromDate || b.checkIn || b.date) || '',
-      endDate: b && (b.endDate || b.toDate || b.checkOut || b.date) || '',
-      confirmed: !!(b && (b.confirmed === true || String(b.status || '').toUpperCase() === 'CONFIRMED')),
-      raw: b
-    };
-  }
-
-  function overlaps(aStart, aEnd, bStart, bEnd) {
-    if (!aStart || !bStart) return false;
-    const ae = aEnd || aStart;
-    const be = bEnd || bStart;
-    return aStart <= be && bStart <= ae;
-  }
-
-  function findBlockingBookings(bookings, changeStart, changeEnd) {
-    return (bookings || [])
-      .map(normaliseBooking)
-      .filter(b => b.confirmed && overlaps(b.startDate, b.endDate, changeStart, changeEnd));
-  }
-
-  function describeBlockers(blockers) {
-    if (!blockers || !blockers.length) return '';
-    return blockers.map(b => {
-      const dates = b.startDate && b.endDate && b.startDate !== b.endDate
-        ? `${b.startDate} to ${b.endDate}`
-        : (b.startDate || 'date not recorded');
-      return `${b.name} — confirmed ${dates}`;
-    }).join('\n');
-  }
-
-  function beginOverride(blockers, requestedChange) {
-    if (!blockers || !blockers.length) throw new Error('No protected booking supplied for override.');
-    const state = {
-      token: `override-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      createdAt: new Date().toISOString(),
-      requestedChange: String(requestedChange || ''),
-      blockers: blockers.map(b => ({
-        id: b.id,
-        name: b.name,
-        startDate: b.startDate,
-        endDate: b.endDate
-      })),
-      stage: 'AWAITING_FINAL_APPROVAL'
-    };
-    try { sessionStorage.setItem(OVERRIDE_KEY, JSON.stringify(state)); } catch (_) {}
-    return state;
-  }
-
-  function getOverride() {
-    try {
-      const raw = sessionStorage.getItem(OVERRIDE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (_) { return null; }
-  }
-
-  function clearOverride() {
-    try { sessionStorage.removeItem(OVERRIDE_KEY); } catch (_) {}
-  }
-
-  function canWriteWithOverride(token) {
-    const state = getOverride();
-    return !!(state && state.stage === 'AWAITING_FINAL_APPROVAL' && state.token === token);
-  }
-
-  function markBookingsNeedsChanging(bookings, blockerIds) {
-    const ids = new Set((blockerIds || []).filter(Boolean));
-    return (bookings || []).map(b => {
-      const n = normaliseBooking(b);
-      const matches = ids.size ? ids.has(n.id) : false;
-      if (!matches) return b;
-      return Object.assign({}, b, {
-        status: 'NEEDS CHANGING',
-        confirmed: false,
-        needsChanging: true,
-        needsChangingReason: 'Alter Trip override affects this confirmed booking.'
-      });
-    });
-  }
-
-  root.DWAJPAlterBookingOverride = {
-    findBlockingBookings,
-    describeBlockers,
-    beginOverride,
-    getOverride,
-    clearOverride,
-    canWriteWithOverride,
-    markBookingsNeedsChanging
-  };
-})(typeof window !== 'undefined' ? window : globalThis);
+/* DWAJP TRIP — Alter Trip confirmed-booking override helper */
+(function(root){'use strict';const KEY='dwajpAlterTripBookingOverride';let current=null;
+function norm(b){return{id:b&&(b.id||b.bookingId||b.ref)||'',name:b&&(b.name||b.title||b.place||b.provider)||'Confirmed booking',startDate:b&&(b.startDate||b.fromDate||b.checkIn||b.date)||'',endDate:b&&(b.endDate||b.toDate||b.checkOut||b.date)||'',confirmed:!!(b&&(b.confirmed===true||String(b.status||'').toUpperCase()==='CONFIRMED')),raw:b}}
+function overlaps(a,b,c,d){if(!a||!c)return false;return a<=(d||c)&&c<=(b||a)}function findBlockingBookings(xs,a,b){return(xs||[]).map(norm).filter(x=>x.confirmed&&overlaps(x.startDate,x.endDate,a,b))}function describeBlockers(xs){return(xs||[]).map(x=>`${x.name} — confirmed ${x.startDate}${x.endDate&&x.endDate!==x.startDate?' to '+x.endDate:''}`).join('\n')}
+function beginOverride(xs,request){if(!xs||!xs.length)throw Error('No protected booking supplied for override.');const s={token:`override-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,createdAt:new Date().toISOString(),requestedChange:String(request||''),blockers:xs.map(x=>({id:x.id,name:x.name,startDate:x.startDate,endDate:x.endDate})),stage:'AWAITING_FINAL_APPROVAL'};try{sessionStorage.setItem(KEY,JSON.stringify(s))}catch(_){}return s}function getOverride(){try{return JSON.parse(sessionStorage.getItem(KEY)||'null')}catch(_){return null}}function clearOverride(){try{sessionStorage.removeItem(KEY)}catch(_){}}function canWriteWithOverride(t){const s=getOverride();return!!(s&&s.stage==='AWAITING_FINAL_APPROVAL'&&s.token===t)}
+function markBookingsNeedsChanging(xs,ids){ids=new Set((ids||[]).filter(Boolean));return(xs||[]).map(b=>ids.has(norm(b).id)?Object.assign({},b,{status:'NEEDS CHANGING',confirmed:false,needsChanging:true,needsChangingReason:'Alter Trip override affects this confirmed booking.'}):b)}function esc(v){return String(v??'').replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]))}
+function blockersForAnalysis(a){const api=root.DWAJP_BOOKINGS;if(!api||!a||a.status!=='RED'||!a.target)return[];return typeof api.confirmedBookingsForDate==='function'?api.confirmedBookingsForDate(a.target).map(norm):[]}
+function enhanceRedScreen(a){const blockers=blockersForAnalysis(a);current=blockers.length?{analysis:a,blockers}:null;if(!current)return;const modal=document.getElementById('alterModal'),bar=modal&&modal.querySelector('.modalbar');if(!bar||document.getElementById('alter2BookingOverride'))return;bar.insertAdjacentHTML('beforebegin',`<section id="alter2BookingOverride" class="findOption"><h3>🔒 Booking causing this lock</h3>${blockers.map(b=>`<p><b>${esc(b.name)}</b><br><span class="muted">${esc(b.startDate)}${b.endDate&&b.endDate!==b.startDate?' → '+esc(b.endDate):''}</span></p>`).join('')}<div class="alter2-warning">Confirmed means protected, not permanent. Changing anyway will mark the affected booking ⚠️ NEEDS CHANGING. DWAJP cannot cancel or change the real reservation.</div><button class="btn gold" type="button" onclick="beginAlter2BookingOverride()">CHANGE ANYWAY — I NEED TO CHANGE THIS</button></section>`)}
+function beginAlter2BookingOverride(){if(!current)return false;const a=current.analysis,blockers=current.blockers,msg=`This will NOT cancel or change the real booking.\n\n${describeBlockers(blockers)}\n\nDWAJP will mark it NEEDS CHANGING and re-scan your trip. Continue?`;if(root.confirm&&!root.confirm(msg))return false;const s=beginOverride(blockers,a.request),api=root.DWAJP_BOOKINGS;if(!api||typeof api.markNeedsChangingByIds!=='function'){root.alert&&root.alert('This booking cannot be released safely yet. Nothing changed.');clearOverride();return false}api.markNeedsChangingByIds(blockers.map(b=>b.id),'Alter Trip override: '+a.request);if(typeof root.analyseAlter2Request==='function'&&typeof root.renderAlter2Analysis==='function'){const next=root.analyseAlter2Request(a.request);next.overrideToken=s.token;root.renderAlter2Analysis(next)}return true}
+root.DWAJPAlterBookingOverride={findBlockingBookings,describeBlockers,beginOverride,getOverride,clearOverride,canWriteWithOverride,markBookingsNeedsChanging,blockersForAnalysis,enhanceRedScreen};root.beginAlter2BookingOverride=beginAlter2BookingOverride;const original=root.renderAlter2Analysis;if(typeof original==='function')root.renderAlter2Analysis=function(a){const r=original(a);try{enhanceRedScreen(a)}catch(e){console.warn('Alter booking override UI skipped',e)}return r};
+})(typeof window!=='undefined'?window:globalThis);
