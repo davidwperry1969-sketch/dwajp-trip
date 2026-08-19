@@ -1,0 +1,55 @@
+name: Fix booking reference parser
+
+on:
+  push:
+    branches:
+      - feature/bookings-overhaul
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bookings-overhaul
+
+      - name: Fix booking reference parsing and wire module
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          bookings = Path('bookings-v2.js')
+          text = bookings.read_text(encoding='utf-8')
+          old = r"(?:confirmation|booking|reference|ref|reservation)\s*(?:number|no\.?|#|code)?\s*[:#-]?\s*([A-Z0-9-]{5,})"
+          new = r"(?:booking\s+reference|confirmation|reference|ref|reservation|booking)\s*(?:number|no\.?|#|code)?\s*[:#-]?\s*([A-Z0-9-]{5,})"
+          if old not in text:
+              raise SystemExit('Expected booking-reference parser pattern not found')
+          bookings.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          index = Path('index.html')
+          html = index.read_text(encoding='utf-8')
+          tag = '<script src="bookings-v2.js"></script>'
+          marker = '</script></body></html>'
+          if tag not in html:
+              if marker not in html:
+                  raise SystemExit('Expected closing script/body marker not found')
+              html = html.replace(marker, f'</script>\n{tag}\n</body></html>', 1)
+              index.write_text(html, encoding='utf-8')
+          PY
+
+      - name: Run Bookings tests
+        run: node bookings-v2.test.js
+
+      - name: Remove one-off workflow and commit fix
+        shell: bash
+        run: |
+          git rm .github/workflows/fix-booking-reference-parser.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bookings-v2.js index.html
+          git commit -m "fix: parse booking reference codes correctly"
+          git push origin HEAD:feature/bookings-overhaul
