@@ -1,0 +1,29 @@
+name: Alter Trip booking override tests
+
+on:
+  push:
+    branches:
+      - feature/alter-trip-booking-override
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test booking override safety helper
+        run: node alter-trip-booking-override.test.js
+      - name: Check core Alter Trip safety remains present
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const html = fs.readFileSync('index.html','utf8');
+          if (!html.includes('function isLocked')) throw new Error('Alter Trip lock protection is missing');
+          if (!html.includes('renderAlter2Analysis')) throw new Error('Alter Trip 2.0 analysis is missing');
+          console.log('Core Alter Trip safety checks passed');
+          NODE
