@@ -1,0 +1,31 @@
+name: Bookings tests
+
+on:
+  push:
+    branches:
+      - feature/bookings-overhaul
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run Bookings tests
+        run: node bookings-v2.test.js
+      - name: Check Bookings is wired into index
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const html = fs.readFileSync('index.html', 'utf8');
+          if (!html.includes('<script src="bookings-v2.js"></script>')) throw new Error('bookings-v2.js is not wired into index.html');
+          if (!html.includes('function dayCard')) throw new Error('core DWAJP app is missing from index.html');
+          if (!html.includes('function isLocked')) throw new Error('Alter Trip lock logic is missing from index.html');
+          console.log('index wiring checks passed');
+          NODE
