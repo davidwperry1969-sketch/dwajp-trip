@@ -497,4 +497,5 @@ function approveAlter2Changes(){let analysis=alter2Pending;if(!analysis||!alter2
 function beginOvernightAlter2(date,index){let day=alter2Day(date),option=(OVERNIGHT_SUGGESTIONS[date]||[])[index];if(!day||!option)return;let request=`Add this suggested overnight on ${day.short}: ${option.name}`;renderAlter2Analysis(analyseAlter2Request(request,{kind:'overnight',date,option}))}
 </script>
 <script src="bookings-v2.js?v=20260819-1"></script>
+<script src="alter-trip-booking-override.js?v=20260819-1"></script>
 </body></html>
