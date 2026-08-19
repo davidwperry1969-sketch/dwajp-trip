@@ -1,0 +1,50 @@
+name: Patch Alter Trip booking bridge
+on:
+  push:
+    branches: [feature/alter-trip-booking-override]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/alter-trip-booking-override
+      - name: Wire booking override bridge
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          b=Path('bookings-v2.js')
+          s=b.read_text()
+          anchor="globalThis.DWAJP_BOOKINGS={allBookings,bookingLocksDate,confirmedBookingsForDate,parseBookingText,parseDateRange,inferCategory,categories:[...BOOKING_CATEGORIES]};"
+          replacement="function markNeedsChangingByIds(ids,reason='Alter Trip override affects this booking.'){let wanted=new Set((ids||[]).filter(Boolean)),changed=false;state.bookings=bookingState().map(item=>{if(!wanted.has(item.id))return item;changed=true;return {...item,status:'NEEDS CHANGING',needsChanging:true,needsChangingReason:reason}});if(changed){saveBookingState();if(typeof globalThis.renderBookingsList==='function')globalThis.renderBookingsList()}return changed}globalThis.DWAJP_BOOKINGS={allBookings,bookingLocksDate,confirmedBookingsForDate,parseBookingText,parseDateRange,inferCategory,markNeedsChangingByIds,categories:[...BOOKING_CATEGORIES]};"
+          if anchor not in s:
+              raise SystemExit('Bookings API anchor not found')
+          s=s.replace(anchor,replacement,1)
+          b.write_text(s)
+
+          i=Path('index.html')
+          html=i.read_text()
+          anchor='<script src="bookings-v2.js?v=20260819-1"></script>'
+          replacement='<script src="bookings-v2.js?v=20260819-1"></script>\n<script src="alter-trip-booking-override.js?v=20260819-1"></script>'
+          if anchor not in html:
+              raise SystemExit('Bookings script tag not found in index')
+          if 'alter-trip-booking-override.js' not in html:
+              html=html.replace(anchor,replacement,1)
+          i.write_text(html)
+          PY
+      - name: Verify helper tests
+        run: |
+          node alter-trip-booking-override.test.js
+          node bookings-v2.test.js
+          grep -q 'alter-trip-booking-override.js' index.html
+          grep -q 'markNeedsChangingByIds' bookings-v2.js
+      - name: Commit bridge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bookings-v2.js index.html
+          git commit -m "Wire Alter Trip booking override bridge"
+          git push origin HEAD:feature/alter-trip-booking-override
