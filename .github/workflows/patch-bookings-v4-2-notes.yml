@@ -1,0 +1,37 @@
+name: Patch Bookings V4.2 notes
+on:
+  push:
+    branches: [feature/bookings-v4-2-email-notes]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bookings-v4-2-email-notes
+      - name: Add labelled notes extraction
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('bookings-v2.js')
+          s=p.read_text()
+          marker='function confirmationReference(raw)'
+          helper="""function bookingNotesFromEmail(raw){let parts=[],fields=[['Check-in', '(?:check[- ]?in time|arrival time)'],['Check-out','(?:check[- ]?out time|departure time)'],['Unit','(?:unit type|room type|vehicle type|site type)'],['Nights','(?:number of nights|nights)'],['Total','(?:total|amount paid|grand total)']];fields.forEach(([name,label])=>{let value=emailLabelValue(raw,label);if(value)parts.push(name+': '+value)});return parts.join(' • ')}\n"""
+          if 'function bookingNotesFromEmail' not in s:
+              s=s.replace(marker,helper+marker,1)
+          old="website=firstWebUrl(raw)||'';return {category:inferCategory(raw),title:cleaned,startDate:checkIn||dates[0],endDate:checkOut||dates[1],confirmation:ref,contact:phone,address,website,notes:''}}"
+          new="website=firstWebUrl(raw)||'',notes=bookingNotesFromEmail(raw);return {category:inferCategory(raw),title:cleaned,startDate:checkIn||dates[0],endDate:checkOut||dates[1],confirmation:ref,contact:phone,address,website,notes}}"
+          if old not in s: raise SystemExit('parseBookingText target missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - name: Commit parser update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bookings-v2.js
+          git commit -m "Extract booking times cost and instructions from emails" || exit 0
+          git push origin HEAD:feature/bookings-v4-2-email-notes
