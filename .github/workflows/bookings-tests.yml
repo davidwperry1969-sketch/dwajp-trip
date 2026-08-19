@@ -24,7 +24,7 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const html = fs.readFileSync('index.html', 'utf8');
-          if (!html.includes('<script src="bookings-v2.js"></script>')) throw new Error('bookings-v2.js is not wired into index.html');
+          if (!/<script\s+src=["']bookings-v2\.js(?:\?[^"']*)?["']\s*><\/script>/.test(html)) throw new Error('bookings-v2.js is not wired into index.html');
           if (!html.includes('function dayCard')) throw new Error('core DWAJP app is missing from index.html');
           if (!html.includes('function isLocked')) throw new Error('Alter Trip lock logic is missing from index.html');
           console.log('index wiring checks passed');
