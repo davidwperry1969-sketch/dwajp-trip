@@ -1,0 +1,47 @@
+name: Patch confirmed booking layout
+on:
+  push:
+    branches: [feature/day-booking-integration]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/day-booking-integration
+      - name: Put confirmed booking in Plan slot
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('bookings-v2.js')
+          s=p.read_text()
+          start=s.index('function confirmedAccommodationForDay(day)')
+          end=s.index('function printBookings()', start)
+          block=s[start:end]
+          replacement=r'''function confirmedAccommodationForDay(day){return bookingsTouchingDate(day.date).find(b=>bookingIsConfirmed(b)&&accommodationCategory(b.category))}
+function confirmedBookingPlanCell(day){let b=confirmedAccommodationForDay(day);if(!b)return '';let website=safeUrl(b.website),details=[`<div class="confirmed-plan-title"><b>${esc(b.title)}</b></div>`,`<div class="confirmed-plan-dates">📅 ${esc(bookingDateRange(b))}</div>`,b.confirmation?`<div><b>Confirmation:</b> ${esc(b.confirmation)}</div>`:'',b.notes?`<div class="confirmed-plan-notes">${esc(b.notes)}</div>`:'',website?`<a class="btn light confirmed-plan-website" target="_blank" rel="noopener" href="${esc(website)}">🌐 Website</a>`:''].filter(Boolean).join('');return `<div class="cell confirmed-booking-plan"><div class="label">🎫 Confirmed booking</div><span class="day-booking-badge">🔒 CONFIRMED • LOCKED</span>${details}</div>`}
+function bookingContactBlock(day){let b=confirmedAccommodationForDay(day);if(!b)return '';let map=(b.address||b.title)?`<a class="btn light" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([b.title,b.address].filter(Boolean).join(' '))}">📍 Map</a>`:'',phone=b.contact&&cleanPhone(b.contact)?`<a class="btn light" href="tel:${esc(cleanPhone(b.contact))}">☎ Call</a>`:'',website=safeUrl(b.website)?`<a class="btn light" target="_blank" rel="noopener" href="${esc(safeUrl(b.website))}">🌐 Website</a>`:'';let lines=[`<b>${esc(b.title)}</b>`,b.address?esc(b.address):'',b.contact?esc(b.contact):'',b.confirmation?`Confirmation ${esc(b.confirmation)}`:''].filter(Boolean);return `<div class="day-booking-contact">${lines.map(x=>`<div>${x}</div>`).join('')}<div class="booking-actions">${map}${phone}${website}</div></div>`}
+const originalDayCard=globalThis.dayCard;if(typeof originalDayCard==='function')globalThis.dayCard=function(day){let html=originalDayCard(day),confirmedStay=confirmedAccommodationForDay(day),planCell=confirmedBookingPlanCell(day);if(confirmedStay&&planCell){html=html.replace(/<div class="cell"><div class="label">Plan \/ logistics<\/div><div class="value">[\s\S]*?<\/div><\/div>/,planCell);let contact=bookingContactBlock(day);if(contact)html=html.replace('<div class="cell contact"><div class="label">Contact / address</div><div class="value">','<div class="cell contact"><div class="label">Contact / address</div>'+contact+'<div class="value old-contact-fallback">');html=html.replace(/<div class="overnight-suggestions"[\s\S]*?<\/section>/,'')}else{let strip=dayBookingStrip(day);if(strip)html=html.replace('<div class="notes">',strip+'<div class="notes">')}return html};
+'''
+          s=s[:start]+replacement+s[end:]
+          css_anchor='.day-booking-contact>div{margin-top:3px}'
+          css_add=css_anchor+'.confirmed-booking-plan{background:#eaf6ec;border-left:5px solid #4f9a61}.confirmed-booking-plan .day-booking-badge{background:#dff1e2;color:#24612e}.confirmed-plan-title{font-size:15px;color:var(--navy);margin:6px 0 3px}.confirmed-plan-dates{font-weight:850;margin:3px 0}.confirmed-plan-notes{margin-top:4px;color:var(--muted)}.confirmed-plan-website{margin-top:7px}.day-booking-contact .booking-actions{margin-top:7px}.old-contact-fallback{margin-top:8px}'
+          if css_anchor not in s: raise SystemExit('css anchor not found')
+          s=s.replace(css_anchor,css_add,1)
+          p.write_text(s)
+          t=Path('bookings-v2.test.js')
+          ts=t.read_text()
+          marker="assert.match(code,/bookingContactBlock/,'confirmed booking details flow into day contact section');"
+          add=marker+"assert.match(code,/confirmedBookingPlanCell/,'confirmed accommodation replaces plan slot');assert.match(code,/Confirmed booking/,'confirmed booking label appears in plan slot');"
+          if marker not in ts: raise SystemExit('test marker not found')
+          t.write_text(ts.replace(marker,add,1))
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bookings-v2.js bookings-v2.test.js
+          git commit -m "Let confirmed booking replace day plan slot"
+          git push origin HEAD:feature/day-booking-integration
