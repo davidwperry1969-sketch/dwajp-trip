@@ -1,3 +1,4 @@
+# trigger V4 patch
 name: Patch bookings email paste V4
 on:
   push:
@@ -28,11 +29,9 @@ function parseBookingText(text){let raw=String(text||''),dates=parseDateRange(ra
           s=s.replace('Type or speak something simple, for example: “The Gallivant NYC 1 September to 4 September”. Then tap FIND & FILL DETAILS.','Paste a confirmation email, type a booking, or speak it. DWAJP will pull out what it can, then you check before saving.')
           s=s.replace("setValue('bookingConfirmation',parsed.confirmation);setValue('bookingContact',parsed.contact);", "setValue('bookingConfirmation',parsed.confirmation);setValue('bookingContact',parsed.contact);setValue('bookingAddress',parsed.address);setValue('bookingWebsite',parsed.website);refreshBookingWebsiteButton();")
           p.write_text(s)
-
           t=Path('bookings-v2.test.js')
-          ts=t.read_text()
-          insert="""\nconst email=api.parseBookingText('Subject: Your hotel booking\\nHotel: Test Hotel\\nCheck-in: 12 September 2026\\nCheck-out: 15 September 2026\\nConfirmation code: ABC123\\n123 Main Street, New York\\n+1 212 555 0100\\nhttps://example.com/manage');assert.equal(email.startDate,'2026-09-12');assert.equal(email.endDate,'2026-09-15');assert.equal(email.confirmation,'ABC123');assert.match(email.address,/123 Main Street/);assert.match(email.website,/example\\.com/);\n"""
-          marker="console.log('bookings-v2 Find & Fill tests passed');"
+          ts=t.read_text();marker="console.log('bookings-v2 Find & Fill tests passed');"
+          insert="\nconst email=api.parseBookingText('Subject: Your hotel booking\\nHotel: Test Hotel\\nCheck-in: 12 September 2026\\nCheck-out: 15 September 2026\\nConfirmation code: ABC123\\n123 Main Street, New York\\n+1 212 555 0100\\nhttps://example.com/manage');assert.equal(email.startDate,'2026-09-12');assert.equal(email.endDate,'2026-09-15');assert.equal(email.confirmation,'ABC123');assert.match(email.address,/123 Main Street/);assert.match(email.website,/example\\.com/);\n"
           if marker in ts and 'const email=api.parseBookingText' not in ts: ts=ts.replace(marker,insert+marker)
           t.write_text(ts)
           PY
