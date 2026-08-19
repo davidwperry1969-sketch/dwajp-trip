@@ -1,8 +1,9 @@
-# trigger V4 patch
 name: Patch bookings email paste V4
 on:
   push:
     branches: [feature/bookings-email-paste-v4]
+  pull_request:
+    branches: [main]
 permissions:
   contents: write
 jobs:
