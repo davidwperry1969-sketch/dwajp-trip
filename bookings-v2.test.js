@@ -1,3 +1,4 @@
+// PR #3 CI trigger: Find & Fill search normalization
 const fs=require('fs');const vm=require('vm');const assert=require('assert');
 const code=fs.readFileSync('bookings-v2.js','utf8');
 const storage={};const document={head:{appendChild(){}},createElement(){return {id:'',textContent:''}},getElementById(){return null}};
