@@ -1,0 +1,42 @@
+name: Patch day booking badge
+on:
+  push:
+    branches: [feature/day-confirmed-booking-badge]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/day-confirmed-booking-badge
+      - name: Make confirmed bookings obvious on day cards
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('bookings-v2.js')
+          s=p.read_text()
+          old="function dayBookingStrip(day){let items=bookingsTouchingDate(day.date);if(!items.length)return '';return `<section class=\"day-bookings\"><div class=\"label\">🎫 BOOKINGS</div>${items.map(b=>`<div class=\"day-booking-row\">${bookingIsConfirmed(b)?'🔒':'🟡'} <b>${esc(b.title)}</b> • ${esc(b.category)}${b.confirmation?` • ${esc(b.confirmation)}`:''}</div>`).join('')}</section>`}"
+          new="function dayBookingStrip(day){let items=bookingsTouchingDate(day.date);if(!items.length)return '';return `<section class=\"day-bookings\"><div class=\"label\">🎫 BOOKINGS</div>${items.map(b=>`<div class=\"day-booking-row ${bookingIsConfirmed(b)?'day-booking-confirmed':'day-booking-unconfirmed'}\"><span class=\"day-booking-badge\">${bookingIsConfirmed(b)?'🔒 CONFIRMED • LOCKED':'🟡 NOT CONFIRMED'}</span><div><b>${esc(b.title)}</b> • ${esc(b.category)}${b.confirmation?` • Confirmation ${esc(b.confirmation)}`:''}</div></div>`).join('')}</section>`}"
+          if old not in s: raise SystemExit('dayBookingStrip target not found')
+          s=s.replace(old,new,1)
+          css_old='.day-bookings{padding:10px 13px;border-bottom:1px solid var(--line);background:#f7fbff}.day-booking-row{font-size:11px;line-height:1.45;margin:3px 0}'
+          css_new='.day-bookings{padding:10px 13px;border-bottom:1px solid var(--line);background:#f7fbff}.day-booking-row{font-size:11px;line-height:1.45;margin:6px 0;padding:9px 10px;border-radius:10px}.day-booking-confirmed{background:#eaf6ec;border-left:4px solid #4f9a61}.day-booking-unconfirmed{background:#fff7dc;border-left:4px solid #c59a45}.day-booking-badge{display:inline-block;border-radius:12px;padding:4px 7px;margin-bottom:4px;font-size:9px;font-weight:900}.day-booking-confirmed .day-booking-badge{background:#dff1e2;color:#24612e}.day-booking-unconfirmed .day-booking-badge{background:#fff1c8;color:#6b5200}'
+          if css_old not in s: raise SystemExit('day booking CSS target not found')
+          s=s.replace(css_old,css_new,1)
+          p.write_text(s)
+          t=Path('bookings-v2.test.js')
+          ts=t.read_text()
+          marker="assert.match(code,/OPEN WEBSITE/,'booking form offers one-tap website button');"
+          add=marker+"assert.match(code,/CONFIRMED • LOCKED/,'day cards visibly label confirmed bookings');assert.match(code,/day-booking-confirmed/,'confirmed day booking styling exists');"
+          if marker not in ts: raise SystemExit('test marker not found')
+          t.write_text(ts.replace(marker,add,1))
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bookings-v2.js bookings-v2.test.js
+          git commit -m "Show confirmed booking status clearly on day cards"
+          git push origin HEAD:feature/day-confirmed-booking-badge
