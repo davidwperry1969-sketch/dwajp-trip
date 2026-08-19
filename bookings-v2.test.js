@@ -1,0 +1,15 @@
+const fs=require('fs');const vm=require('vm');const assert=require('assert');
+const code=fs.readFileSync('bookings-v2.js','utf8');
+const storage={};const document={head:{appendChild(){}},createElement(){return {id:'',textContent:''}},getElementById(){return null}};
+const context={console,document,window:{},globalThis:null,state:{},STORE:'dwajp-trip-v5',localStorage:{setItem(k,v){storage[k]=v}},esc:x=>String(x??''),backBar:()=>'',renderHome(){},isLocked:()=>false};context.globalThis=context;vm.createContext(context);vm.runInContext(code,context);
+const api=context.DWAJP_BOOKINGS;
+assert.ok(api,'test API is exposed');
+assert.ok(api.categories.includes('Flight'));assert.ok(api.categories.includes('RV Park / Campground'));
+assert.equal(api.bookingLocksDate({category:'Accommodation',status:'CONFIRMED',startDate:'2026-09-22',endDate:'2026-09-24'},'2026-09-22'),true);
+assert.equal(api.bookingLocksDate({category:'Accommodation',status:'CONFIRMED',startDate:'2026-09-22',endDate:'2026-09-24'},'2026-09-23'),true);
+assert.equal(api.bookingLocksDate({category:'Accommodation',status:'CONFIRMED',startDate:'2026-09-22',endDate:'2026-09-24'},'2026-09-24'),false,'checkout date is not treated as an occupied accommodation night');
+assert.equal(api.bookingLocksDate({category:'Flight',status:'CONFIRMED',startDate:'2026-10-27',endDate:'2026-10-27'},'2026-10-27'),true);
+assert.equal(api.bookingLocksDate({category:'Flight',status:'UNCONFIRMED',startDate:'2026-10-27',endDate:'2026-10-27'},'2026-10-27'),false);
+const parsed=api.parseBookingText('French Quarter RV Resort\n22 Sep 2026 to 24 Sep 2026\nConfirmation 2026075827\n+1 504-586-3000');
+assert.equal(parsed.category,'RV Park / Campground');assert.equal(parsed.startDate,'2026-09-22');assert.equal(parsed.endDate,'2026-09-24');assert.equal(parsed.confirmation,'2026075827');
+console.log('bookings-v2 tests passed');
