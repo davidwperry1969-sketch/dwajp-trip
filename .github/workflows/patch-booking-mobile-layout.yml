@@ -1,0 +1,54 @@
+name: Patch booking mobile layout
+on:
+  push:
+    branches: [feature/cache-bust-bookings]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/cache-bust-bookings
+      - name: Improve phone address and website layout
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('bookings-v2.js')
+          s=p.read_text()
+          old="<div class=\"field booking-wide\"><label>Address / route</label><input id=\"bookingAddress\" value=\"${esc(b.address||'')}\"></div>"
+          new="<div class=\"field booking-wide\"><label>Address / route</label><textarea id=\"bookingAddress\" class=\"booking-address\" rows=\"2\">${esc(b.address||'')}</textarea></div>"
+          if old not in s:
+              raise SystemExit('address field target not found')
+          s=s.replace(old,new,1)
+          old_css=".booking-helper-row .btn{flex:1}.booking-website-row{display:flex;gap:8px;align-items:center}.booking-website-row input{flex:1}.booking-website-row .btn{white-space:nowrap}.booking-filter{align-items:stretch;flex-direction:column}"
+          new_css=".booking-helper-row .btn{flex:1}.booking-address{min-height:72px;resize:vertical;line-height:1.35}.booking-website-row{display:flex;gap:8px;align-items:center}.booking-website-row input{flex:1;min-width:0}.booking-website-row .btn{white-space:nowrap}.booking-filter{align-items:stretch;flex-direction:column}"
+          if old_css not in s:
+              raise SystemExit('website CSS target not found')
+          s=s.replace(old_css,new_css,1)
+          mobile=".booking-helper-row .btn{flex:1}.booking-website-row{display:flex;gap:8px;align-items:center}"
+          # add a dedicated phone override near end if not already present
+          marker=".booking-filter select{width:100%;min-height:44px}}"
+          replacement=".booking-filter select{width:100%;min-height:44px}.booking-website-row{flex-direction:column;align-items:stretch}.booking-website-row .btn{width:100%;justify-content:center;min-height:48px}.booking-address{min-height:96px;white-space:normal;overflow-wrap:anywhere}}"
+          if marker not in s:
+              raise SystemExit('mobile media marker not found')
+          s=s.replace(marker,replacement,1)
+          p.write_text(s)
+          t=Path('bookings-v2.test.js')
+          ts=t.read_text()
+          needle="assert.match(code,/OPEN WEBSITE/,'booking form offers one-tap website button');"
+          add="assert.match(code,/booking-address/,'address field uses mobile-friendly multiline layout');assert.match(code,/booking-website-row\\{flex-direction:column/,'website controls stack on phones');"
+          if add not in ts:
+              if needle not in ts: raise SystemExit('test marker not found')
+              ts=ts.replace(needle,needle+add,1)
+              t.write_text(ts)
+          PY
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bookings-v2.js bookings-v2.test.js
+          git commit -m "Improve booking form layout on phones"
+          git push origin HEAD:feature/cache-bust-bookings
