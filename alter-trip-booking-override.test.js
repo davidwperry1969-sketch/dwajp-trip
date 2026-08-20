@@ -38,6 +38,11 @@ const departureMatch = api.chooseBlockingBookings(
 );
 assert.strictEqual(departureMatch.length, 1);
 assert.strictEqual(departureMatch[0].name, 'The Gallivant Times Square');
+const departureSolutions = api.solutionCopy({request:'Move New York departure from 4 September to 3 September'}, departureMatch);
+assert.ok(departureSolutions.some(x=>x.includes('The Gallivant Times Square')));
+assert.ok(departureSolutions.some(x=>x.includes('change the protected booking/date')));
+assert.ok(departureSolutions.some(x=>x.includes('leave as soon as the protected commitment allows')));
+assert.ok(departureSolutions.some(x=>x.includes('keep the trip unchanged')));
 
 const normalMatch = api.chooseBlockingBookings(
   bookings,
