@@ -20,14 +20,33 @@ vm.runInContext(fs.readFileSync('alter-trip-booking-override.js','utf8'), contex
 const api = context.DWAJPAlterBookingOverride;
 
 const bookings = [
-  {id:'gallivant', name:'The Gallivant Times Square', startDate:'2026-09-01', endDate:'2026-09-04', status:'CONFIRMED', confirmed:true},
-  {id:'later', name:'Later Hotel', startDate:'2026-09-10', endDate:'2026-09-12', status:'CONFIRMED', confirmed:true}
+  {id:'gallivant', name:'The Gallivant Times Square', category:'Accommodation', startDate:'2026-09-01', endDate:'2026-09-04', status:'CONFIRMED', confirmed:true},
+  {id:'rv', name:'Cruise America RV', category:'Car / RV Hire', startDate:'2026-09-04', endDate:'2026-10-20', status:'CONFIRMED', confirmed:true},
+  {id:'later', name:'Later Hotel', category:'Accommodation', startDate:'2026-09-10', endDate:'2026-09-12', status:'CONFIRMED', confirmed:true}
 ];
 
 const blockers = api.findBlockingBookings(bookings, '2026-09-03', '2026-09-03');
 assert.strictEqual(blockers.length, 1);
 assert.strictEqual(blockers[0].name, 'The Gallivant Times Square');
 assert.ok(api.describeBlockers(blockers).includes('The Gallivant Times Square'));
+
+const departureMatch = api.chooseBlockingBookings(
+  bookings,
+  '2026-09-04',
+  'Move New York departure from 4 September to 3 September',
+  [bookings[1]]
+);
+assert.strictEqual(departureMatch.length, 1);
+assert.strictEqual(departureMatch[0].name, 'The Gallivant Times Square');
+
+const normalMatch = api.chooseBlockingBookings(
+  bookings,
+  '2026-09-04',
+  'Change the RV pickup time on 4 September',
+  [bookings[1]]
+);
+assert.strictEqual(normalMatch.length, 1);
+assert.strictEqual(normalMatch[0].name, 'Cruise America RV');
 
 const state = api.beginOverride(blockers, 'Leave New York on 3 September');
 assert.ok(state.token);
