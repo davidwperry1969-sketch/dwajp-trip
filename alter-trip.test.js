@@ -392,7 +392,7 @@ assert.equal(context.checkoutDeparture.affected.some(item => item.date === '2026
 assert.equal(context.checkoutDeparture.kind, 'departure-travel');
 assert.equal(context.checkoutDeparture.scannedDays, 57, 'departure planning scans the complete current itinerary');
 assert.deepEqual([...context.checkoutDeparture.changes.map(change=>change.date)], ['2026-09-24','2026-09-25']);
-assert.deepEqual([...context.checkoutDeparture.routeLegs.map(leg=>`${leg.origin} -> ${leg.destination}`)], ['NEW ORLEANS -> Henderson, Louisiana','Henderson, Louisiana -> Mason, Texas']);
+assert.deepEqual([...context.checkoutDeparture.routeLegs.map(leg=>`${leg.origin} -> ${leg.destination}`)], ['NEW ORLEANS -> Beaumont, Texas','Beaumont, Texas -> Mason, Texas']);
 assert.match(context.checkoutDeparture.changes[0].changes.plan, /30-ft RV[\s\S]*fuel[\s\S]*rest[\s\S]*setup/i);
 assert.doesNotMatch(context.checkoutDeparture.changes[0].changes.plan, /User-approved change:/i, 'the command is converted into a coherent travel day rather than appended verbatim');
 assert.equal(context.checkoutDeparture.changes[0].bookingContext.confirmation, '2026075827');
@@ -449,16 +449,18 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(run('formatDrivingDuration(45)'), '45 min');
 
   // A flexible checkout-day command is reconstructed into verified RV travel days before approval.
-  run("globalThis.checkoutTravel=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.checkoutTravelStateBefore=JSON.stringify(state); globalThis.checkoutTravelStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRouteCalls=[]; globalThis.checkoutRouteIntelligence={async resolveAsync({origin,destination}){globalThis.checkoutRouteCalls.push(origin.key+'>'+destination.key);let values={'new orleans>henderson':[210.4,145],'henderson>mason':[690.2,440]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  run("globalThis.checkoutTravel=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.checkoutTravelStateBefore=JSON.stringify(state); globalThis.checkoutTravelStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRouteCalls=[]; globalThis.checkoutRouteIntelligence={async resolveAsync({origin,destination}){globalThis.checkoutRouteCalls.push(origin.key+'>'+destination.key);let values={'new orleans>beaumont':[445,285],'beaumont>mason':[570,390]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
   const checkoutRouteStatus = await run("verifyAlter2Routes(globalThis.checkoutTravel,{routeIntelligence:globalThis.checkoutRouteIntelligence})");
   assert.equal(checkoutRouteStatus.status, 'verified');
-  assert.deepEqual(Array.from(context.checkoutRouteCalls), ['new orleans>henderson','henderson>mason'], 'both proposed legs use validated endpoints through route intelligence');
-  assert.deepEqual(Array.from(checkoutRouteStatus.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['NEW ORLEANS','Henderson, Louisiana',210.4,145,'GREEN'],['Henderson, Louisiana','Mason, Texas',690.2,440,'YELLOW']]);
+  assert.deepEqual(Array.from(checkoutRouteStatus.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['NEW ORLEANS','Beaumont, Texas',445,285,'GREEN'],['Beaumont, Texas','Mason, Texas',570,390,'YELLOW']]);
+  assert.equal(context.checkoutRouteCalls.some(call=>call.includes('birmingham')), false, 'checkout balancing never asks for a Birmingham/backtracking route');
+  assert.equal(run("alter2ForwardRouteSequence('NEW ORLEANS','Mason, Texas',globalThis.checkoutTravel.routeVerification.legs)"), true, 'every selected leg progresses through the westbound corridor');
   assert.equal(run('alter2ApprovalReady(globalThis.checkoutTravel)'), true, 'only the fully verified non-RED departure sequence becomes approval-ready');
   const checkoutReview = run('renderAlter2ChangeRows(globalThis.checkoutTravel)');
   assert.equal((checkoutReview.match(/class="findOption alter2-diff"/g)||[]).length, 2, 'review lists exactly the two proposed changed days');
-  assert.match(checkoutReview, /Thu 24 Sep — NEW ORLEANS → Henderson, Louisiana[\s\S]*210\.4 km[\s\S]*2 hr 25 min[\s\S]*GREEN/);
-  assert.match(checkoutReview, /Fri 25 Sep — Henderson, Louisiana → Mason, Texas[\s\S]*690\.2 km[\s\S]*7 hr 20 min[\s\S]*YELLOW/);
+  assert.match(checkoutReview, /Thu 24 Sep — NEW ORLEANS → Beaumont, Texas[\s\S]*445 km[\s\S]*4 hr 45 min[\s\S]*GREEN/);
+  assert.match(checkoutReview, /Fri 25 Sep — Beaumont, Texas → Mason, Texas[\s\S]*570 km[\s\S]*6 hr 30 min[\s\S]*YELLOW/);
+  assert.doesNotMatch(checkoutReview, /protected New Orleans booking (?:ahead|is reached)|before (?:the )?protected New Orleans/i);
   assert.match(checkoutReview, /CONFIRMED \/ BOOKED — UNCHANGED[\s\S]*French Quarter RV Resort[\s\S]*Confirmation 2026075827/);
   assert.match(checkoutReview, /OVERNIGHT OPTIONS — SUGGESTED \/ NOT BOOKED/);
   assert.match(checkoutReview, /Availability has not been verified[\s\S]*30-ft RV/);
@@ -471,15 +473,24 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(run("DAYS.find(day=>day.date==='2026-09-22').status"), 'CONFIRMED');
   assert.equal(run("DAYS.find(day=>day.date==='2026-09-23').status"), 'CONFIRMED');
 
+  // A failed departure balance cannot fall back to the global Birmingham repair candidate.
+  run("globalThis.backwardCheckout={...globalThis.checkoutTravel,routeSafety:{redDays:[{date:'2026-09-25',distanceKm:1455.5,durationMinutes:655}]},routeVerification:{status:'verified',legs:[{origin:'NEW ORLEANS',destination:'Henderson, Louisiana',verification:'verified',distanceKm:214,durationMinutes:150,pressure:'GREEN'},{origin:'Henderson, Louisiana',destination:'Birmingham',verification:'verified',distanceKm:700,durationMinutes:470,pressure:'YELLOW'},{origin:'Birmingham',destination:'Mason, Texas',verification:'verified',distanceKm:1455.5,durationMinutes:655,pressure:'RED'}]},requiresRouteVerification:false,repairs:null,selectedRepairIndex:undefined}");
+  const backwardRepairs = await run("alter2GenerateRepairSuggestions(globalThis.backwardCheckout,{routeIntelligence:globalThis.checkoutRouteIntelligence})");
+  assert.equal(backwardRepairs.length, 1);
+  assert.equal(backwardRepairs[0].id, 'keep-original');
+  assert.doesNotMatch(JSON.stringify(backwardRepairs), /Birmingham/i, 'backward/eastward repair stops are never generated for the Texas departure command');
+  assert.doesNotMatch(JSON.stringify(backwardRepairs), /protected New Orleans booking (?:ahead|is reached)|before (?:the )?protected New Orleans/i);
+  assert.equal(run('alter2ApprovalReady(globalThis.backwardCheckout)'), false, 'a backward or RED departure repair cannot become approval-ready');
+
   // The MAKE A CHANGE runtime boundary reconstructs stale generic state, then renders that plan.
-  run("state={}; localStorage.removeItem(STORE); globalThis.checkoutRuntimeBefore=JSON.stringify(state); globalThis.checkoutRuntimeStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRuntimeCommand='Leave New Orleans on 24 September and drive toward Texas'; alter2Pending={...analyseAlter2Request(globalThis.checkoutRuntimeCommand),kind:'direct',summary:'The flexible date matched.',changes:[{date:'2026-09-24',changes:{plan:'User-approved change: '+globalThis.checkoutRuntimeCommand+'\\nUser-approved change: '+globalThis.checkoutRuntimeCommand},reason:'Matched flexible date.'}],routeLegs:[],requiresRouteVerification:false,routeVerification:null}; globalThis.checkoutRuntimeCalls=[]; RouteIntelligence.setProvider({async routeAsync({origin,destination}){globalThis.checkoutRuntimeCalls.push(origin.key+'>'+destination.key);let values={'new orleans>henderson':[210.4,145],'henderson>mason':[690.2,440]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); showAlter2FinalProposal(); globalThis.checkoutRuntimeInitialHtml=document.getElementById('alterModal').innerHTML");
+  run("state={}; localStorage.removeItem(STORE); globalThis.checkoutRuntimeBefore=JSON.stringify(state); globalThis.checkoutRuntimeStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRuntimeCommand='Leave New Orleans on 24 September and drive toward Texas'; alter2Pending={...analyseAlter2Request(globalThis.checkoutRuntimeCommand),kind:'direct',summary:'The flexible date matched.',changes:[{date:'2026-09-24',changes:{plan:'User-approved change: '+globalThis.checkoutRuntimeCommand+'\\nUser-approved change: '+globalThis.checkoutRuntimeCommand},reason:'Matched flexible date.'}],routeLegs:[],requiresRouteVerification:false,routeVerification:null}; globalThis.checkoutRuntimeCalls=[]; RouteIntelligence.setProvider({async routeAsync({origin,destination}){globalThis.checkoutRuntimeCalls.push(origin.key+'>'+destination.key);let values={'new orleans>beaumont':[445,285],'beaumont>mason':[570,390]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); showAlter2FinalProposal(); globalThis.checkoutRuntimeInitialHtml=document.getElementById('alterModal').innerHTML");
   await new Promise(resolve => setImmediate(resolve));
   run("globalThis.checkoutRuntimeReview=renderAlter2ChangeRows(alter2Pending); globalThis.checkoutRuntimeKind=alter2Pending.kind; globalThis.checkoutRuntimeDates=alter2Pending.changes.map(change=>change.date); globalThis.checkoutRuntimeReady=alter2ApprovalReady(alter2Pending)");
   assert.equal(context.checkoutRuntimeKind, 'departure-travel', 'MAKE A CHANGE cannot carry stale generic analysis into Review Before Approval');
   assert.deepEqual([...context.checkoutRuntimeDates], ['2026-09-24','2026-09-25']);
-  assert.deepEqual([...context.checkoutRuntimeCalls.filter(call=>call==='new orleans>henderson'||call==='henderson>mason')], ['new orleans>henderson','henderson>mason'], 'the constructed checkout legs are the routes sent for verification');
-  assert.match(context.checkoutRuntimeInitialHtml, /Review Before Approval[\s\S]*START:[\s\S]*NEW ORLEANS[\s\S]*DESTINATION \/ STOPPING AREA:[\s\S]*Henderson, Louisiana/);
-  assert.match(context.checkoutRuntimeReview, /ROUTE:[\s\S]*NEW ORLEANS → Henderson, Louisiana[\s\S]*DISTANCE:[\s\S]*210\.4 km[\s\S]*DRIVING TIME:[\s\S]*2 hr 25 min/);
+  assert.deepEqual([...context.checkoutRuntimeCalls.filter(call=>call==='new orleans>beaumont'||call==='beaumont>mason')], ['new orleans>beaumont','beaumont>mason'], 'the constructed checkout legs are the routes sent for verification');
+  assert.match(context.checkoutRuntimeInitialHtml, /Review Before Approval[\s\S]*START:[\s\S]*NEW ORLEANS[\s\S]*DESTINATION \/ STOPPING AREA:[\s\S]*Beaumont, Texas/);
+  assert.match(context.checkoutRuntimeReview, /ROUTE:[\s\S]*NEW ORLEANS → Beaumont, Texas[\s\S]*DISTANCE:[\s\S]*445 km[\s\S]*DRIVING TIME:[\s\S]*4 hr 45 min/);
   assert.match(context.checkoutRuntimeReview, /PADDED RV TRAVEL:[\s\S]*fuel, rest and setup allowance[\s\S]*PRESSURE:[\s\S]*GREEN/i);
   assert.match(context.checkoutRuntimeReview, /selected as a validated, manageable first stopping area toward Texas Hill Country[\s\S]*protected commitments/i);
   assert.match(context.checkoutRuntimeReview, /OVERNIGHT OPTIONS — SUGGESTED \/ NOT BOOKED/);
