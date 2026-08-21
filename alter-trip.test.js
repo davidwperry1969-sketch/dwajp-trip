@@ -95,6 +95,9 @@ vm.runInContext("globalThis.vegasColdAnalysis=analyseAlter2Request('I want to st
 assert.equal(vegasColdContext.vegasColdAnalysis.proposalValidation.valid, true, 'cold-start proposal uses the consistent compressed repair');
 vm.runInContext("globalThis.yellowstoneColdAnalysis=analyseAlter2Request('I want an extra day in Yellowstone. Make it work without changing any confirmed bookings or MUST DO items.')", vegasColdContext);
 assert.match(vegasColdContext.yellowstoneColdAnalysis.summary, /cannot be fitted safely/i, 'cold-start persisted state produces the truthful Yellowstone no-safe-fit result');
+vm.runInContext("globalThis.transferColdAnalysis=analyseAlter2Request('I want to leave Yellowstone one day earlier and spend the extra day in Seattle. Make it work without changing confirmed bookings or MUST DO items.')", vegasColdContext);
+assert.equal(vegasColdContext.transferColdAnalysis.kind, 'day-transfer', 'cold-start parser recognises the paired zero-net transfer');
+assert.equal(vegasColdContext.transferColdAnalysis.proposalValidation.valid, true, 'cold-start persisted state constructs coherent transfer metadata');
 assert.equal(vegasColdStorage.data['dwajp-trip-v5'], vegasColdBytes, 'cold-start Las Vegas analysis leaves saved overrides byte-for-byte unchanged');
 assert.equal((vegasColdContext.document.getElementById('content').innerHTML.match(/<article class="card"/g) || []).length, 57, 'cold-start persisted itinerary still renders all 57 cards');
 
@@ -1099,6 +1102,42 @@ async function runRouteIntelligenceAsyncTests() {
   assert.doesNotMatch(encodedAssessment, /80 minutes/);
   const wedAnalysis = await run("analyseTripChangeWithRouteIntelligence(\"We don't need to get to Milwaukee until later on Friday.\")");
   assert.equal(wedAnalysis.routeAssessments.some(item => item.day.date === '2026-09-09'), false, 'Wed 9 Sep is a local Ortonville/Detroit excursion, not an intercity route for verification');
+
+  // Paired source/destination language is a zero-net transfer, not an extra day
+  // that cascades into the protected 20 October commitment.
+  run("state={days:{'2026-09-24':{dest:'NEW ORLEANS → Winnie, Texas',dest_query:'Winnie, Texas'}}}; localStorage.setItem(STORE,JSON.stringify(state)); globalThis.transferStateBefore=JSON.stringify(state); globalThis.transferStorageBefore=localStorage.getItem(STORE); globalThis.transferBookingsBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.transferMustBefore=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); globalThis.transferTimedBefore=JSON.stringify(mergedDays().filter(day=>day.date>='2026-10-18'&&day.date<='2026-10-20')); globalThis.transferCommand='I want to leave Yellowstone one day earlier and spend the extra day in Seattle. Make it work without changing confirmed bookings or MUST DO items.'; globalThis.transferAnalysis=analyseAlter2Request(globalThis.transferCommand)");
+  assert.equal(context.transferAnalysis.kind, 'day-transfer');
+  assert.equal(context.transferAnalysis.solverDetails.netDays, 0);
+  assert.equal(context.transferAnalysis.solverDetails.surrendered.date, '2026-10-15', 'the last eligible non-MUST, non-timed Yellowstone local day supplies the transfer');
+  assert.equal(context.transferAnalysis.solverDetails.received.date, '2026-10-17');
+  assert.deepEqual(Array.from(context.transferAnalysis.changes.map(change=>[change.date,change.changes.dest])), [['2026-10-15','YELLOWSTONE → MISSOULA'],['2026-10-16','MISSOULA → SEATTLE / EVERETT'],['2026-10-17','SEATTLE / EVERETT']]);
+  assert.deepEqual(Array.from(context.transferAnalysis.routeLegs.map(leg=>`${leg.origin} -> ${leg.destination}`)), ['YELLOWSTONE -> MISSOULA','MISSOULA -> SEATTLE / EVERETT']);
+  assert.equal(context.transferAnalysis.proposalValidation.valid, true, context.transferAnalysis.proposalValidation.issues.join('; '));
+  assert.match(context.transferAnalysis.summary, /Transfer one flexible day[\s\S]*57 days/i);
+  assert.equal(run('JSON.stringify(state)'), context.transferStateBefore);
+  assert.equal(localStorage.getItem('dwajp-trip-v5'), context.transferStorageBefore);
+  run("globalThis.transferCalls=[]; globalThis.transferRoutes={async resolveAsync({origin,destination}){globalThis.transferCalls.push(origin.label+'>'+destination.label);let values=/Yellowstone/i.test(origin.label)?[520,390]:/Missoula/i.test(origin.label)?[760,540]:null;return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  const transferVerification = await run('verifyAlter2Routes(globalThis.transferAnalysis,{routeIntelligence:globalThis.transferRoutes})');
+  assert.equal(transferVerification.status, 'verified');
+  assert.deepEqual(Array.from(transferVerification.legs.map(leg=>[leg.changeDate,leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['2026-10-15','YELLOWSTONE','MISSOULA',520,390,'YELLOW'],['2026-10-16','MISSOULA','SEATTLE / EVERETT',760,540,'YELLOW']]);
+  assert.ok(transferVerification.legs.every(leg=>leg.pressure!=='RED'));
+  assert.ok(run('alter2ApprovalReady(globalThis.transferAnalysis)'));
+  run("alter2Pending=globalThis.transferAnalysis; showAlter2FinalProposal(); globalThis.transferReview=renderAlter2ChangeRows(globalThis.transferAnalysis); globalThis.transferStateAfterReview=JSON.stringify(state); globalThis.transferStorageAfterReview=localStorage.getItem(STORE)");
+  assert.match(context.transferReview, /Thu 15 Oct — YELLOWSTONE → MISSOULA[\s\S]*520 km[\s\S]*6 hr 30 min[\s\S]*YELLOW/i);
+  assert.match(context.transferReview, /Fri 16 Oct — MISSOULA → SEATTLE \/ EVERETT[\s\S]*760 km[\s\S]*9 hr[\s\S]*YELLOW/i);
+  assert.match(context.transferReview, /Sat 17 Oct — SEATTLE \/ EVERETT[\s\S]*day transferred from Yellowstone/i);
+  assert.equal(context.transferStateAfterReview, context.transferStateBefore);
+  assert.equal(context.transferStorageAfterReview, context.transferStorageBefore);
+  run("globalThis.transferApplied=approveAlter2Changes(); globalThis.transferDaysAfter=mergedDays(); globalThis.transferCards=(document.getElementById('content').innerHTML.match(/<article class=\"card/g)||[]).length; globalThis.transfer20=mergedDays().find(day=>day.date==='2026-10-20'); globalThis.transferTimedAfter=JSON.stringify(mergedDays().filter(day=>day.date>='2026-10-18'&&day.date<='2026-10-20')); globalThis.transferBookingsAfter=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.transferMustAfter=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); resetEdits(); globalThis.transferReset15=mergedDays().find(day=>day.date==='2026-10-15'); globalThis.transferReset17=mergedDays().find(day=>day.date==='2026-10-17')");
+  assert.equal(context.transferApplied, true);
+  assert.equal(context.transferDaysAfter.length, 57);
+  assert.equal(context.transferCards, 57);
+  assert.match(context.transfer20.dest, /RV RETURN → SAN FRANCISCO/);
+  assert.equal(context.transferTimedAfter, context.transferTimedBefore, '18–20 October timed and protected commitments remain byte-for-byte unchanged');
+  assert.equal(context.transferBookingsAfter, context.transferBookingsBefore);
+  assert.equal(context.transferMustAfter, context.transferMustBefore);
+  assert.match(context.transferReset15.plan, /Lamar Valley/);
+  assert.match(context.transferReset17.dest, /MISSOULA → SEATTLE \/ EVERETT/);
 
   // Exact Yellowstone regression: the only repeated local Seattle days carry a
   // timed target and return-preparation duty, so neither is silently sacrificed.
