@@ -538,7 +538,23 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(localStorage.getItem('dwajp-trip-v5'), context.halfwayStorageBefore, 'route optimisation and review do not write localStorage');
   assert.equal(run("state.days['2026-09-22']"), undefined);
   assert.equal(run("state.days['2026-09-23']"), undefined);
-  run("resetEdits()");
+  run("alter2Pending=globalThis.halfwayAnalysis; globalThis.halfwayApproved=approveAlter2Changes(); globalThis.approvedWinnieDay=mergedDays().find(day=>day.date==='2026-09-24'); globalThis.approvedMasonDay=mergedDays().find(day=>day.date==='2026-09-25'); globalThis.approvedWinnieOvernights=overnightSuggestions(globalThis.approvedWinnieDay); globalThis.approvedMasonOvernights=overnightSuggestions(globalThis.approvedMasonDay); globalThis.approvedWinnieOptions=overnightOptionsForDay(globalThis.approvedWinnieDay)");
+  assert.equal(context.halfwayApproved, true);
+  assert.match(context.approvedWinnieDay.dest, /Winnie, Texas/);
+  assert.match(context.approvedWinnieOvernights, /Winnie, Texas RV park \/ campground search[\s\S]*Public campground search near Winnie, Texas[\s\S]*Authorised overnight RV parking near Winnie, Texas/);
+  assert.match(context.approvedWinnieOvernights, /query=Winnie%2C%20Texas|near%20Winnie%2C%20Texas/);
+  assert.doesNotMatch(context.approvedWinnieOvernights, /Dos Rios|Hill Country State Natural Area|Walmart near the selected Hill Country route/i, 'approved Winnie day cannot retain Mason/Hill Country cards');
+  assert.equal(context.approvedWinnieOptions.some(option=>option.phone||/\bavailable\b|availability (?:is )?confirmed/i.test(option.detail||'')), false, 'generic Winnie leads invent no phone or availability');
+  assert.match(context.approvedMasonOvernights, /Mason, Texas RV park \/ campground search[\s\S]*Public campground search near Mason, Texas/, 'Friday retains destination-appropriate Mason suggestions');
+  assert.doesNotMatch(context.approvedMasonOvernights, /Winnie/i);
+  run("globalThis.winnieUseStateBefore=JSON.stringify(state); beginOvernightAlter2('2026-09-24',0); globalThis.winnieUseAnalysis=alter2Pending; globalThis.winnieUseStateAfter=JSON.stringify(state)");
+  assert.match(context.winnieUseAnalysis.request, /Winnie, Texas RV park \/ campground search/);
+  assert.equal(context.winnieUseStateAfter, context.winnieUseStateBefore, 'the destination-correct Use this stop action still enters approval without writing');
+  assert.equal(run("state.days['2026-09-22']"), undefined);
+  assert.equal(run("state.days['2026-09-23']"), undefined);
+  run("resetEdits(); globalThis.resetSep24=mergedDays().find(day=>day.date==='2026-09-24'); globalThis.resetSep24Overnights=overnightSuggestions(globalThis.resetSep24)");
+  assert.equal(context.resetSep24.dest, 'TEXAS / TRAVEL BUFFER');
+  assert.match(context.resetSep24Overnights, /Dos Rios RV Park|Hill Country State Natural Area/, 'Reset Edits restores the original date-based overnight suggestions');
 
   // The MAKE A CHANGE runtime boundary reconstructs stale generic state, then renders that plan.
   run("state={}; localStorage.removeItem(STORE); globalThis.checkoutRuntimeBefore=JSON.stringify(state); globalThis.checkoutRuntimeStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRuntimeCommand='Leave New Orleans on 24 September and drive toward Texas'; alter2Pending={...analyseAlter2Request(globalThis.checkoutRuntimeCommand),kind:'direct',summary:'The flexible date matched.',changes:[{date:'2026-09-24',changes:{plan:'User-approved change: '+globalThis.checkoutRuntimeCommand+'\\nUser-approved change: '+globalThis.checkoutRuntimeCommand},reason:'Matched flexible date.'}],routeLegs:[],requiresRouteVerification:false,routeVerification:null}; globalThis.checkoutRuntimeCalls=[]; RouteIntelligence.setProvider({async routeAsync({origin,destination}){globalThis.checkoutRuntimeCalls.push(origin.key+'>'+destination.key);let values={'new orleans>beaumont':[445,285],'beaumont>mason':[570,390]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); showAlter2FinalProposal(); globalThis.checkoutRuntimeInitialHtml=document.getElementById('alterModal').innerHTML");
