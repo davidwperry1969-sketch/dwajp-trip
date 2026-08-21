@@ -98,6 +98,9 @@ assert.match(vegasColdContext.yellowstoneColdAnalysis.summary, /cannot be fitted
 vm.runInContext("globalThis.transferColdAnalysis=analyseAlter2Request('I want to leave Yellowstone one day earlier and spend the extra day in Seattle. Make it work without changing confirmed bookings or MUST DO items.')", vegasColdContext);
 assert.equal(vegasColdContext.transferColdAnalysis.kind, 'day-transfer', 'cold-start parser recognises the paired zero-net transfer');
 assert.equal(vegasColdContext.transferColdAnalysis.proposalValidation.valid, true, 'cold-start persisted state constructs coherent transfer metadata');
+vm.runInContext("globalThis.reallocationColdAnalysis=analyseAlter2Request('I want to spend one less day in Las Vegas and use that day to break up a long driving day later in the trip. Keep all confirmed bookings and MUST DO items unchanged.')", vegasColdContext);
+assert.equal(vegasColdContext.reallocationColdAnalysis.kind, 'source-reallocation', 'cold-start parser honours the explicitly named source location');
+assert.equal(vegasColdContext.reallocationColdAnalysis.target, '2026-10-03');
 assert.equal(vegasColdStorage.data['dwajp-trip-v5'], vegasColdBytes, 'cold-start Las Vegas analysis leaves saved overrides byte-for-byte unchanged');
 assert.equal((vegasColdContext.document.getElementById('content').innerHTML.match(/<article class="card"/g) || []).length, 57, 'cold-start persisted itinerary still renders all 57 cards');
 
@@ -1102,6 +1105,60 @@ async function runRouteIntelligenceAsyncTests() {
   assert.doesNotMatch(encodedAssessment, /80 minutes/);
   const wedAnalysis = await run("analyseTripChangeWithRouteIntelligence(\"We don't need to get to Milwaukee until later on Friday.\")");
   assert.equal(wedAnalysis.routeAssessments.some(item => item.day.date === '2026-09-09'), false, 'Wed 9 Sep is a local Ortonville/Detroit excursion, not an intercity route for verification');
+
+  // Named-source reallocation must resolve Las Vegas before searching later
+  // driving legs; generic token scoring must never substitute Texas Hill Country.
+  run("state={days:{'2026-09-24':{dest:'NEW ORLEANS → Winnie, Texas',dest_query:'Winnie, Texas'}}}; localStorage.setItem(STORE,JSON.stringify(state)); globalThis.reallocationStateBefore=JSON.stringify(state); globalThis.reallocationStorageBefore=localStorage.getItem(STORE); globalThis.reallocationBookingsBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.reallocationMustBefore=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); globalThis.reallocationTimedBefore=JSON.stringify(mergedDays().filter(day=>day.date>='2026-10-18'&&day.date<='2026-10-20')); globalThis.reallocationCommand='I want to spend one less day in Las Vegas and use that day to break up a long driving day later in the trip. Keep all confirmed bookings and MUST DO items unchanged.'; globalThis.reallocation=analyseAlter2Request(globalThis.reallocationCommand)");
+  assert.equal(context.reallocation.kind, 'source-reallocation');
+  assert.equal(context.reallocation.target, '2026-10-03');
+  assert.equal(context.reallocation.solverDetails.surrendered.date, '2026-10-05');
+  assert.ok(context.reallocation.affected.every(item=>item.date>='2026-10-03'), 'no unrelated earlier/fallback day is selected');
+  assert.equal(context.reallocation.affected.some(item=>item.date==='2026-09-25'), false, 'Texas Hill Country is never substituted for named Las Vegas');
+  assert.equal(context.reallocation.changes.length, 0, 'command entry does not append text to an unrelated day');
+  assert.ok(!run('alter2ApprovalReady(globalThis.reallocation)'), 'approval stays blocked until route-backed planning completes');
+  assert.equal(run('JSON.stringify(state)'), context.reallocationStateBefore);
+  assert.equal(localStorage.getItem('dwajp-trip-v5'), context.reallocationStorageBefore);
+  run("globalThis.reallocationCalls=[]; globalThis.reallocationRoutes={async resolveAsync({origin,destination}){let key=origin.key+'>'+destination.key;globalThis.reallocationCalls.push(key);let values={'las vegas>yosemite':[650,450],'yosemite>elko':[530,420],'elko>yellowstone':[480,360],'yellowstone>missoula':[430.1,260],'missoula>seattle everett':[806.3,498],'missoula>spokane':[319.8,190],'spokane>seattle everett':[455.2,270]}[key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  const reallocationVerification = await run('verifyAlter2Routes(globalThis.reallocation,{routeIntelligence:globalThis.reallocationRoutes})');
+  assert.equal(reallocationVerification.status, 'verified');
+  assert.equal(context.reallocation.proposalValidation.valid, true, context.reallocation.proposalValidation.issues.join('; '));
+  assert.deepEqual(Array.from(context.reallocation.changes.map(change=>change.date)), ['2026-10-05','2026-10-06','2026-10-07','2026-10-08','2026-10-09','2026-10-10','2026-10-11','2026-10-12','2026-10-13','2026-10-14','2026-10-15','2026-10-16','2026-10-17']);
+  assert.deepEqual(Array.from(reallocationVerification.legs.map(leg=>[leg.changeDate,leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['2026-10-05','LAS VEGAS','YOSEMITE',650,450,'YELLOW'],['2026-10-08','YOSEMITE','ELKO',530,420,'YELLOW'],['2026-10-12','ELKO','YELLOWSTONE',480,360,'GREEN'],['2026-10-15','YELLOWSTONE','MISSOULA',430.1,260,'GREEN'],['2026-10-16','MISSOULA','Spokane, Washington',319.8,190,'GREEN'],['2026-10-17','Spokane, Washington','SEATTLE / EVERETT',455.2,270,'GREEN']]);
+  assert.equal(context.reallocation.solverDetails.originalLongLeg.date, '2026-10-17');
+  assert.equal(context.reallocation.solverDetails.originalLongLeg.pressure, 'RED');
+  assert.equal(context.reallocation.solverDetails.splitStop, 'Spokane, Washington');
+  assert.equal(context.reallocation.solverDetails.protectedDate, '2026-10-20');
+  assert.ok(run('alter2ApprovalReady(globalThis.reallocation)'));
+  run("alter2Pending=globalThis.reallocation; globalThis.reallocationReview=renderAlter2ChangeRows(globalThis.reallocation); globalThis.reallocationStateAfterReview=JSON.stringify(state); globalThis.reallocationStorageAfterReview=localStorage.getItem(STORE)");
+  assert.match(context.reallocationReview, /SOURCE DAY SURRENDERED[\s\S]*Mon 5 Oct[\s\S]*Final Vegas day/i);
+  assert.match(context.reallocationReview, /ORIGINAL LONG LEG:[\s\S]*MISSOULA → SEATTLE \/ EVERETT[\s\S]*806\.3 km[\s\S]*8 hr 18 min[\s\S]*RED/i);
+  assert.match(context.reallocationReview, /INSERTED STOPPING AREA:[\s\S]*Spokane, Washington[\s\S]*SUGGESTION \/ NOT BOOKED/i);
+  assert.match(context.reallocationReview, /Mon 5 Oct — LAS VEGAS → YOSEMITE[\s\S]*650 km[\s\S]*YELLOW/i);
+  assert.match(context.reallocationReview, /Fri 16 Oct — MISSOULA → Spokane, Washington[\s\S]*319\.8 km[\s\S]*GREEN/i);
+  assert.match(context.reallocationReview, /Sat 17 Oct — Spokane, Washington → SEATTLE \/ EVERETT[\s\S]*455\.2 km[\s\S]*GREEN/i);
+  assert.match(context.reallocationReview, /SUGGESTION \/ NOT BOOKED/i);
+  assert.doesNotMatch(context.reallocationReview, /User-approved change:/i);
+  assert.equal(context.reallocationStateAfterReview, context.reallocationStateBefore);
+  assert.equal(context.reallocationStorageAfterReview, context.reallocationStorageBefore);
+  run("globalThis.reallocationApplied=approveAlter2Changes(); globalThis.reallocationCards=(document.getElementById('content').innerHTML.match(/<article class=\"card/g)||[]).length; globalThis.reallocationTimedAfter=JSON.stringify(mergedDays().filter(day=>day.date>='2026-10-18'&&day.date<='2026-10-20')); globalThis.reallocationBookingsAfter=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.reallocationMustAfter=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); resetEdits(); globalThis.reallocationReset5=mergedDays().find(day=>day.date==='2026-10-05'); globalThis.reallocationReset17=mergedDays().find(day=>day.date==='2026-10-17')");
+  assert.equal(context.reallocationApplied, true);
+  assert.equal(context.reallocationCards, 57);
+  assert.equal(context.reallocationTimedAfter, context.reallocationTimedBefore);
+  assert.equal(context.reallocationBookingsAfter, context.reallocationBookingsBefore);
+  assert.equal(context.reallocationMustAfter, context.reallocationMustBefore);
+  assert.match(context.reallocationReset5.plan, /Final Vegas day/);
+  assert.match(context.reallocationReset17.dest, /MISSOULA → SEATTLE \/ EVERETT/);
+
+  // Generic named-source wording resolves Elko rather than relying on Las Vegas.
+  run("state={}; localStorage.removeItem(STORE); globalThis.genericReallocation=analyseAlter2Request('Spend one less day in Elko and use that day to split a later long driving leg. Keep confirmed and MUST DO items unchanged.')");
+  assert.equal(context.genericReallocation.kind, 'source-reallocation');
+  assert.equal(context.genericReallocation.target, '2026-10-09');
+  assert.equal(context.genericReallocation.solverDetails.surrendered.date, '2026-10-12');
+  const genericReallocationVerification = await run('verifyAlter2Routes(globalThis.genericReallocation,{routeIntelligence:globalThis.reallocationRoutes})');
+  assert.equal(genericReallocationVerification.status, 'verified');
+  assert.equal(context.genericReallocation.solverDetails.splitStop, 'Spokane, Washington');
+  assert.ok(context.genericReallocation.changes.every(change=>change.date>='2026-10-12'));
+  assert.equal(localStorage.getItem('dwajp-trip-v5'), null, 'generic analysis and verification remain read-only');
 
   // Paired source/destination language is a zero-net transfer, not an extra day
   // that cascades into the protected 20 October commitment.
