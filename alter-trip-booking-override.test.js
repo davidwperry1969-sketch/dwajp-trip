@@ -37,12 +37,20 @@ const departureMatch = api.chooseBlockingBookings(
   [bookings[1]]
 );
 assert.strictEqual(departureMatch.length, 1);
-assert.strictEqual(departureMatch[0].name, 'The Gallivant Times Square');
+assert.strictEqual(departureMatch[0].name, 'Cruise America RV');
 const departureSolutions = api.solutionCopy({request:'Move New York departure from 4 September to 3 September'}, departureMatch);
-assert.ok(departureSolutions.some(x=>x.includes('The Gallivant Times Square')));
-assert.ok(departureSolutions.some(x=>x.includes('change the protected booking/date')));
-assert.ok(departureSolutions.some(x=>x.includes('leave as soon as the protected commitment allows')));
-assert.ok(departureSolutions.some(x=>x.includes('keep the trip unchanged')));
+assert.ok(departureSolutions.some(x=>x.includes('Cruise America RV')));
+assert.ok(departureSolutions.some(x=>x.includes('will not change a real reservation')));
+assert.ok(departureSolutions.some(x=>x.includes('leave the trip unchanged')));
+
+const frenchQuarter = {id:'fq',name:'French Quarter RV Resort',category:'RV Park / Campground',startDate:'2026-09-22',endDate:'2026-09-24',status:'CONFIRMED',confirmed:true};
+assert.strictEqual(api.bookingLocksDate(frenchQuarter,'2026-09-22'), true, 'check-in night is protected');
+assert.strictEqual(api.bookingLocksDate(frenchQuarter,'2026-09-23'), true, 'second occupied night is protected');
+assert.strictEqual(api.bookingLocksDate(frenchQuarter,'2026-09-24'), false, 'checkout/departure date is not an occupied night');
+assert.strictEqual(api.findBlockingBookings([frenchQuarter],'2026-09-23','2026-09-23').length, 1);
+assert.strictEqual(api.findBlockingBookings([frenchQuarter],'2026-09-24','2026-09-24').length, 0);
+assert.strictEqual(api.chooseBlockingBookings([frenchQuarter],'2026-09-23','Leave New Orleans on 23 September',[frenchQuarter]).length, 1);
+assert.strictEqual(api.chooseBlockingBookings([frenchQuarter],'2026-09-24','Leave New Orleans on 24 September and drive toward Texas',[]).length, 0, 'departure wording does not turn checkout into a booking collision');
 
 const normalMatch = api.chooseBlockingBookings(
   bookings,

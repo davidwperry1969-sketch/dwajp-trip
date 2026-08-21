@@ -384,6 +384,14 @@ assert.match(context.alter2AppliedPlan, /Tijuana skipped/);
 assert.equal(run("state.days['2026-09-22']"), undefined);
 
 assert.equal(run("alter2ProtectedCommitments().filter(item=>item.multiNight).map(item=>item.date).join(',')"), '2026-09-22,2026-09-23', 'G. both nights of the booking are protected');
+run("globalThis.checkoutDeparture=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.occupiedNightDeparture=analyseAlter2Request('Leave New Orleans on 23 September and drive toward Texas')");
+assert.equal(context.checkoutDeparture.target, '2026-09-24');
+assert.notEqual(context.checkoutDeparture.status, 'RED', `24 Sep checkout/departure is not blocked by the 22–24 Sep accommodation booking: ${JSON.stringify(context.checkoutDeparture)}`);
+assert.doesNotMatch(context.checkoutDeparture.summary, /French Quarter|touch(?:es|ing) a protected/i);
+assert.equal(context.checkoutDeparture.affected.some(item => item.date === '2026-09-24' && item.locked), false);
+assert.equal(context.occupiedNightDeparture.target, '2026-09-23');
+assert.equal(context.occupiedNightDeparture.status, 'RED', '23 Sep remains protected as an occupied booking night');
+assert.match(context.occupiedNightDeparture.summary, /protected commitment/i);
 run("state={}; localStorage.removeItem(STORE); renderAlter2Analysis(analyseAlter2Request('Move the confirmed French Quarter accommodation.')); globalThis.alter2RedBefore=JSON.stringify(state); showAlter2FinalProposal(); globalThis.alter2RedApply=approveAlter2Changes(); globalThis.alter2RedAfter=JSON.stringify(state)");
 assert.equal(context.alter2RedApply, false);
 assert.equal(context.alter2RedAfter, context.alter2RedBefore);
