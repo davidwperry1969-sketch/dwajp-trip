@@ -485,6 +485,24 @@ async function runRouteIntelligenceAsyncTests() {
   assert.doesNotMatch(JSON.stringify(backwardRepairs), /protected New Orleans booking (?:ahead|is reached)|before (?:the )?protected New Orleans/i);
   assert.equal(run('alter2ApprovalReady(globalThis.backwardCheckout)'), false, 'a backward or RED departure repair cannot become approval-ready');
 
+  // Approval reconciles the following local day and week header without changing the master itinerary.
+  run("state={}; localStorage.removeItem(STORE); alter2Pending=globalThis.checkoutTravel; globalThis.checkoutApproved=approveAlter2Changes(); globalThis.checkoutApproved24=mergedDays().find(day=>day.date==='2026-09-24'); globalThis.checkoutApproved25=mergedDays().find(day=>day.date==='2026-09-25'); globalThis.checkoutApproved26=mergedDays().find(day=>day.date==='2026-09-26'); globalThis.checkoutWeek4Route=state.weekRoutes[4]; globalThis.checkoutApprovedStorage=localStorage.getItem(STORE); globalThis.checkoutMaster26=DAYS.find(day=>day.date==='2026-09-26'); globalThis.checkoutHomeHtml=document.getElementById('app').innerHTML");
+  assert.equal(context.checkoutApproved, true);
+  assert.match(context.checkoutApproved24.dest, /NEW ORLEANS → Beaumont, Texas/);
+  assert.match(context.checkoutApproved25.dest, /Beaumont, Texas → Mason, Texas/);
+  assert.equal(context.checkoutApproved26.weather, '17–28°C • LOCAL', 'the following relaxed day no longer carries the stale Houston distance');
+  assert.doesNotMatch([context.checkoutApproved24,context.checkoutApproved25,context.checkoutApproved26].map(day=>[day.dest,day.weather,day.dest_query,day.route].join(' ')).join('\n'), /Houston/i, '24–26 Sep route display metadata contains no stale Houston origin');
+  assert.match(context.checkoutWeek4Route, /MEMPHIS → NEW ORLEANS → Beaumont, Texas → Mason, Texas → TEXAS HILL COUNTRY/i);
+  assert.doesNotMatch(context.checkoutWeek4Route, /Houston/i);
+  assert.match(context.checkoutHomeHtml, /Houston is <b>skipped<\/b>/i, 'the intentional trip-decision rule remains visible');
+  assert.equal(context.checkoutMaster26.weather, '17–28°C • ~570 km from Houston', 'the immutable master itinerary remains available to Reset Edits');
+  assert.equal(run("state.days['2026-09-22']"), undefined);
+  assert.equal(run("state.days['2026-09-23']"), undefined);
+  assert.match(context.checkoutApprovedStorage, /17–28°C • LOCAL/);
+  run("resetEdits(); globalThis.checkoutReset26=mergedDays().find(day=>day.date==='2026-09-26'); globalThis.checkoutResetWeekRoute=state.weekRoutes");
+  assert.equal(context.checkoutReset26.weather, '17–28°C • ~570 km from Houston', 'Reset Edits restores the original downstream master text');
+  assert.equal(context.checkoutResetWeekRoute, undefined, 'Reset Edits clears the approved week-route override');
+
   // The MAKE A CHANGE runtime boundary reconstructs stale generic state, then renders that plan.
   run("state={}; localStorage.removeItem(STORE); globalThis.checkoutRuntimeBefore=JSON.stringify(state); globalThis.checkoutRuntimeStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRuntimeCommand='Leave New Orleans on 24 September and drive toward Texas'; alter2Pending={...analyseAlter2Request(globalThis.checkoutRuntimeCommand),kind:'direct',summary:'The flexible date matched.',changes:[{date:'2026-09-24',changes:{plan:'User-approved change: '+globalThis.checkoutRuntimeCommand+'\\nUser-approved change: '+globalThis.checkoutRuntimeCommand},reason:'Matched flexible date.'}],routeLegs:[],requiresRouteVerification:false,routeVerification:null}; globalThis.checkoutRuntimeCalls=[]; RouteIntelligence.setProvider({async routeAsync({origin,destination}){globalThis.checkoutRuntimeCalls.push(origin.key+'>'+destination.key);let values={'new orleans>beaumont':[445,285],'beaumont>mason':[570,390]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); showAlter2FinalProposal(); globalThis.checkoutRuntimeInitialHtml=document.getElementById('alterModal').innerHTML");
   await new Promise(resolve => setImmediate(resolve));
