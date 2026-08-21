@@ -27,6 +27,39 @@ vm.runInContext(script, context);
 const run = code => vm.runInContext(code, context);
 const modal = context.document.getElementById('alterModal');
 
+// Canonical Friends/Family private stay: one record drives itinerary, contacts,
+// navigation, print and Alter Trip protection without render-time persistence.
+assert.equal(run("privateStayById('anne-tim-oconomowoc').displayName"), 'Anne & Tim');
+assert.equal(run("privateStayFullAddress(privateStayById('anne-tim-oconomowoc'))"), '1190 N Griffith Road, Oconomowoc, WI 53066, USA');
+for (const date of ['2026-09-10','2026-09-11','2026-09-12','2026-09-13','2026-09-14']) {
+  assert.equal(run(`privateStaysForDate('${date}').length`), 1, `${date} is an occupied Anne & Tim night`);
+  assert.equal(run(`alter2Affected('${date}','test').locked`), true, `${date} is protected by the canonical private stay`);
+}
+assert.equal(run("privateStaysForDate('2026-09-15').length"), 0, 'departure is checkout-exclusive');
+assert.equal(run("alter2Affected('2026-09-15','test').locked"), false, 'departure day is not locked by the private stay');
+const privateStayCard = run("dayCard(mergedDays().find(day=>day.date==='2026-09-12'))");
+assert.match(privateStayCard, /PRIVATE STAY — FRIENDS &amp; FAMILY[\s\S]*Anne &amp; Tim[\s\S]*1190 N Griffith Road, Oconomowoc, WI 53066, USA[\s\S]*CONFIRMED \/ PROTECTED/);
+assert.match(privateStayCard, /query=1190%20N%20Griffith%20Road%2C%20Oconomowoc%2C%20WI%2053066%2C%20USA/);
+assert.doesNotMatch(privateStayCard, /private-stay-call/, 'Call is omitted until a phone exists');
+assert.doesNotMatch(run("dayCard(mergedDays().find(day=>day.date==='2026-09-15'))"), /data-private-stay-id/, 'departure day has no occupied-stay panel');
+run('showContacts(); globalThis.privateStayContacts=document.getElementById("content").innerHTML');
+assert.match(context.privateStayContacts, /PRIVATE STAY \/ FRIENDS &amp; FAMILY[\s\S]*Anne &amp; Tim[\s\S]*1190 N Griffith Road/);
+assert.doesNotMatch(context.privateStayContacts, /private-stay-call/);
+assert.match(run("printAccommodation(mergedDays().find(day=>day.date==='2026-09-12'))"), /PRIVATE STAY \/ FRIENDS &amp; FAMILY — CONFIRMED \/ PROTECTED[\s\S]*1190 N Griffith Road/);
+run("state={days:{'2026-09-12':{contact:'Wrong override address',privateStayAddress:'Wrong duplicate'}}}; localStorage.setItem(STORE,JSON.stringify(state)); globalThis.privateStayBytes=localStorage.getItem(STORE); renderHome(); globalThis.privateStayColdMarkup=document.getElementById('content').innerHTML");
+assert.equal((context.privateStayColdMarkup.match(/<article class="card"/g)||[]).length,57,'all itinerary cards render with persisted overrides');
+const privatePersistedCard=context.privateStayColdMarkup.match(/<article class="card" id="day-2026-09-12">[\s\S]*?<\/article>/)[0];
+assert.match(privatePersistedCard,/1190 N Griffith Road, Oconomowoc, WI 53066, USA/,'canonical address wins at render time');
+assert.doesNotMatch(privatePersistedCard,/Wrong override address|Wrong duplicate/);
+assert.equal(run('localStorage.getItem(STORE)'),context.privateStayBytes,'rendering is read-only');
+run("globalThis.privateStayImpact=analyseAlter2Request('Leave Anne and Tim on 12 September');");
+assert.equal(context.privateStayImpact.status,'RED');
+assert.match(context.privateStayImpact.summary,/Anne & Tim/);
+assert.equal(context.privateStayImpact.changes.length,0,'protected private stay is never silently rewritten');
+run('resetEdits(); globalThis.privateStayReset=privateStayById("anne-tim-oconomowoc"); renderHome(); globalThis.privateStayResetCards=(document.getElementById("content").innerHTML.match(/<article class="card"/g)||[]).length');
+assert.equal(context.privateStayReset.address.street,'1190 N Griffith Road');
+assert.equal(context.privateStayResetCards,57);
+
 // A saved approved destination must be safe during the script's initial render,
 // before the later route-intelligence registry declarations have initialized.
 const startupElements = {};
@@ -165,14 +198,16 @@ assert.equal(context.document.body.classList.contains('print-calendar-mode'), fa
 
 // Unconfirmed overnight suggestions cover the trip and never upgrade a booking.
 const confirmedAccommodationDates = ['2026-09-22','2026-09-23'];
-const suggestionDates = run("DAYS.map(day=>day.date).filter(date=>date!=='2026-10-27'&&!['2026-09-22','2026-09-23'].includes(date))");
-assert.equal(suggestionDates.length, 54, 'all 54 unconfirmed overnight dates are audited');
+const privateStayDates = ['2026-09-10','2026-09-11','2026-09-12','2026-09-13','2026-09-14'];
+const suggestionDates = run("DAYS.map(day=>day.date).filter(date=>date!=='2026-10-27'&&!['2026-09-10','2026-09-11','2026-09-12','2026-09-13','2026-09-14','2026-09-22','2026-09-23'].includes(date))");
+assert.equal(suggestionDates.length, 49, 'all remaining unconfirmed overnight dates are audited');
 for (const date of suggestionDates) {
   const suggestionCard = run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`);
   assert.match(suggestionCard, /OVERNIGHT — NOT BOOKED/, `${date} shows unconfirmed overnight options`);
   assert.match(suggestionCard, /USE THIS STOP/);
   assert.match(suggestionCard, /google\.com\/maps\/search/);
 }
+for (const date of privateStayDates) assert.doesNotMatch(run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`), /OVERNIGHT — NOT BOOKED/, `${date} uses the confirmed private stay instead of suggestions`);
 for (const date of confirmedAccommodationDates) {
   assert.equal(run(`DAYS.find(day=>day.date==='${date}').status`), 'CONFIRMED');
   assert.doesNotMatch(run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`), /OVERNIGHT — NOT BOOKED/, `${date} keeps its confirmed booking distinct`);
