@@ -109,7 +109,7 @@ assert.equal(suggestionDates.length, 54, 'all 54 unconfirmed overnight dates are
 for (const date of suggestionDates) {
   const suggestionCard = run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`);
   assert.match(suggestionCard, /OVERNIGHT — NOT BOOKED/, `${date} shows unconfirmed overnight options`);
-  assert.match(suggestionCard, /Use this stop — connect to Alter Trip later/);
+  assert.match(suggestionCard, /USE THIS STOP/);
   assert.match(suggestionCard, /google\.com\/maps\/search/);
 }
 for (const date of confirmedAccommodationDates) {
@@ -454,17 +454,24 @@ assert.ok(context.alter2Continuity.affected.length >= 2);
 assert.match(context.alter2Continuity.affected[1].reason, /Next-day origin/);
 assert.equal(context.alter2Continuity.requiresRouteVerification, true);
 
-run("state={}; localStorage.removeItem(STORE); globalThis.overnightBefore=JSON.stringify(state); beginOvernightAlter2('2026-09-06',0); globalThis.overnightAnalysis=alter2Pending; globalThis.overnightAfterAnalysis=JSON.stringify(state)");
+run("state={}; localStorage.removeItem(STORE); globalThis.overnightMaster=mergedDays().find(day=>day.date==='2026-09-06'); globalThis.overnightBefore=JSON.stringify(state); beginOvernightAlter2('2026-09-06',0); globalThis.overnightAnalysis=alter2Pending; globalThis.overnightAfterAnalysis=JSON.stringify(state)");
 assert.equal(context.overnightAnalysis.kind, 'overnight', 'I. Use this stop enters Alter Trip 2.0');
 assert.equal(context.overnightAnalysis.status, 'GREEN');
 assert.equal(context.overnightAfterAnalysis, context.overnightBefore, 'overnight analysis does not write state');
 assert.match(modal.innerHTML, /Four Mile Creek State Park[\s\S]*Nothing has changed/);
 assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-09-06'))"), /beginOvernightAlter2\('2026-09-06',0\)/);
-run("showAlter2FinalProposal(); globalThis.overnightApproved=approveAlter2Changes(); globalThis.overnightSaved=state.days['2026-09-06']");
+run("showAlter2FinalProposal(); globalThis.overnightReview=document.getElementById('alterModal').innerHTML; globalThis.overnightReviewState=JSON.stringify(state); globalThis.overnightReviewStorage=localStorage.getItem(STORE); globalThis.overnightApproved=approveAlter2Changes(); globalThis.overnightSaved=state.days['2026-09-06']; globalThis.overnightRendered=document.getElementById('content').innerHTML");
+assert.match(context.overnightReview, /Review Before Approval[\s\S]*DATE:[\s\S]*Sun 6 Sep[\s\S]*CURRENT ROUTE \/ DESTINATION:[\s\S]*WASHINGTON → NIAGARA FALLS[\s\S]*SELECTED OVERNIGHT STOP:[\s\S]*Four Mile Creek State Park[\s\S]*SUGGESTED \/ NOT BOOKED[\s\S]*Availability or overnight permission has NOT been verified/);
+assert.equal(context.overnightReviewState, context.overnightBefore, 'review does not write itinerary state');
+assert.equal(context.overnightReviewStorage, null, 'review does not write localStorage');
 assert.equal(context.overnightApproved, true);
-assert.match(context.overnightSaved.plan, /Suggested overnight — NOT BOOKED: Four Mile Creek State Park/);
-assert.match(context.overnightSaved.contact, /SUGGESTION — NOT BOOKED/);
+assert.equal(context.overnightSaved.overnightSelection.name, 'Four Mile Creek State Park');
+assert.equal(context.overnightSaved.overnightSelection.status, 'SUGGESTED / NOT BOOKED');
+assert.equal(context.overnightSaved.overnightSelection.availabilityVerified, false);
+assert.equal(context.overnightSaved.plan, undefined, 'approval does not overwrite Plan / Logistics');
+assert.equal(context.overnightSaved.contact, undefined, 'approval does not overwrite Contact / address');
 assert.equal(context.overnightSaved.status, undefined, 'selecting a suggestion never upgrades booking status');
+assert.equal((context.overnightRendered.match(/<article class="card/g)||[]).length, 57, 'all 57 days render after overnight approval');
 
 assert.equal(run("DAYS.find(day=>day.date==='2026-09-22').status"), 'CONFIRMED', 'J. first New Orleans booked night remains confirmed');
 assert.equal(run("DAYS.find(day=>day.date==='2026-09-23').status"), 'CONFIRMED', 'J. second New Orleans booked night remains confirmed');
@@ -580,9 +587,24 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(context.approvedWinnieOptions.some(option=>option.phone||/\bavailable\b|availability (?:is )?confirmed/i.test(option.detail||'')), false, 'generic Winnie leads invent no phone or availability');
   assert.match(context.approvedMasonOvernights, /Mason, Texas RV park \/ campground search[\s\S]*Public campground search near Mason, Texas/, 'Friday retains destination-appropriate Mason suggestions');
   assert.doesNotMatch(context.approvedMasonOvernights, /Winnie/i);
-  run("globalThis.winnieUseStateBefore=JSON.stringify(state); beginOvernightAlter2('2026-09-24',0); globalThis.winnieUseAnalysis=alter2Pending; globalThis.winnieUseStateAfter=JSON.stringify(state)");
+  assert.match(context.approvedWinnieOvernights, /USE THIS STOP/);
+  assert.match(context.approvedMasonOvernights, /USE THIS STOP/);
+  run("globalThis.masonUseStateBefore=JSON.stringify(state); beginOvernightAlter2('2026-09-25',0); showAlter2FinalProposal(); globalThis.masonUseReview=document.getElementById('alterModal').innerHTML; cancelAlter2(); globalThis.masonUseStateAfter=JSON.stringify(state)");
+  assert.match(context.masonUseReview, /Fri 25 Sep[\s\S]*Winnie, Texas → Mason, Texas[\s\S]*Mason, Texas RV park \/ campground search[\s\S]*SUGGESTED \/ NOT BOOKED/);
+  assert.equal(context.masonUseStateAfter, context.masonUseStateBefore, 'Mason selection review does not write state');
+  run("globalThis.winnieUseStateBefore=JSON.stringify(state); globalThis.winnieRouteBefore=JSON.stringify(state.days['2026-09-24'].verifiedRoute); globalThis.masonDayBefore=JSON.stringify(state.days['2026-09-25']); beginOvernightAlter2('2026-09-24',0); globalThis.winnieUseAnalysis=alter2Pending; globalThis.winnieUseStateAfter=JSON.stringify(state); showAlter2FinalProposal(); globalThis.winnieUseReview=document.getElementById('alterModal').innerHTML; globalThis.winnieUseStorageBeforeApproval=localStorage.getItem(STORE)");
   assert.match(context.winnieUseAnalysis.request, /Winnie, Texas RV park \/ campground search/);
   assert.equal(context.winnieUseStateAfter, context.winnieUseStateBefore, 'the destination-correct Use this stop action still enters approval without writing');
+  assert.match(context.winnieUseReview, /Thu 24 Sep[\s\S]*NEW ORLEANS → Winnie, Texas[\s\S]*Winnie, Texas RV park \/ campground search[\s\S]*Availability or overnight permission has NOT been verified/);
+  assert.equal(context.winnieUseStorageBeforeApproval, localStorage.getItem('dwajp-trip-v5'), 'opening Winnie review does not write localStorage');
+  run("globalThis.winnieUseApproved=approveAlter2Changes(); globalThis.winnieSelected=state.days['2026-09-24']; globalThis.masonDayAfter=JSON.stringify(state.days['2026-09-25']); globalThis.winnieApprovedCards=(document.getElementById('content').innerHTML.match(/<article class=\"card/g)||[]).length");
+  assert.equal(context.winnieUseApproved, true);
+  assert.equal(context.winnieSelected.overnightSelection.name, 'Winnie, Texas RV park / campground search');
+  assert.equal(context.winnieSelected.overnightSelection.status, 'SUGGESTED / NOT BOOKED');
+  assert.equal(context.winnieSelected.overnightSelection.availabilityVerified, false);
+  assert.equal(JSON.stringify(context.winnieSelected.verifiedRoute), context.winnieRouteBefore, 'overnight approval preserves the already-verified route result');
+  assert.equal(context.masonDayAfter, context.masonDayBefore, 'overnight approval leaves the following Mason day byte-for-byte unchanged');
+  assert.equal(context.winnieApprovedCards, 57);
   assert.equal(run("state.days['2026-09-22']"), undefined);
   assert.equal(run("state.days['2026-09-23']"), undefined);
   run("resetEdits(); globalThis.resetSep24=mergedDays().find(day=>day.date==='2026-09-24'); globalThis.resetSep24Overnights=overnightSuggestions(globalThis.resetSep24)");
