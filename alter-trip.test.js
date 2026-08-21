@@ -439,6 +439,9 @@ assert.match(run("DAYS.find(day=>day.date==='2026-09-22').plan"), /Confirmation 
 assert.match(run("DAYS.find(day=>day.date==='2026-09-23').plan"), /Confirmation 2026075827/);
 assert.match(html, /\.alter2-grid\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(250px,1fr\)\)/, 'Alter Trip 2.0 is responsive on desktop/tablet');
 assert.match(html, /@media\(max-width:720px\)\{\.alter2-grid\{grid-template-columns:1fr\}/, 'Alter Trip 2.0 collapses safely on phones');
+assert.match(html, /\.alter2-warning\{[^}]*display:block[^}]*width:100%[^}]*max-width:100%[^}]*height:auto[^}]*white-space:normal[^}]*overflow-wrap:anywhere[^}]*line-height:1\.4[^}]*padding:10px/, 'Alter Trip warnings expand, wrap and retain padding at desktop/tablet widths');
+assert.match(html, /@media\(max-width:720px\)\{\.alter2-grid\{grid-template-columns:1fr\}\.alter2-status strong\{font-size:18px\}\.alter2-warning\{position:static;width:100%;padding:10px;margin:8px 0\}/, 'Alter Trip warnings remain in normal flow and full-width on phones');
+assert.match(html, /\.alter2-route-component\{min-width:0;max-width:100%\}/, 'overnight review cards allow warning content to shrink without horizontal overflow');
 
 async function runRouteIntelligenceAsyncTests() {
   // Mapbox and planning retain minutes internally; only visible text is formatted.
