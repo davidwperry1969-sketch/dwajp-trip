@@ -65,6 +65,54 @@ run('resetEdits(); globalThis.privateStayReset=privateStayById("anne-tim-oconomo
 assert.equal(context.privateStayReset.address.street,'1190 N Griffith Road');
 assert.equal(context.privateStayResetCards,57);
 
+// Phone-first Friends/Family editor: user data is persisted separately from
+// itinerary experiments and every existing private-stay consumer sees the
+// same effective record.
+run("openPrivateStayForm('anne-tim-oconomowoc')");
+assert.match(modal.innerHTML,/EDIT FRIEND \/ FAMILY[\s\S]*value="Anne &amp; Tim"[\s\S]*value="1190 N Griffith Road"/,'Anne & Tim form is pre-filled from the canonical master');
+assert.match(modal.innerHTML,/id="ps-phone" type="tel"/,'phone field requests a phone keyboard');
+const privateBytesBeforeCancel=localStorage.getItem('dwajp-trip-private-stays-v1');
+run('closePrivateStayForm()');
+assert.equal(localStorage.getItem('dwajp-trip-private-stays-v1'),privateBytesBeforeCancel,'opening and cancelling the editor writes nothing');
+function setPrivateField(id,value,checked){const el=context.document.getElementById(id);el.value=value;if(checked!==undefined)el.checked=checked}
+function fillPrivateStayForm({id='',name,phone='',street='',city='',state='',postcode='',country='USA',type='OVERNIGHT',arrival='',departure='',priority='IMPORTANT',status='CONFIRMED',protectedValue=true,notes=''}){
+  for(const [key,value] of Object.entries({'ps-id':id,'ps-name':name,'ps-phone':phone,'ps-street':street,'ps-city':city,'ps-state':state,'ps-postcode':postcode,'ps-country':country,'ps-type':type,'ps-arrival':arrival,'ps-departure':departure,'ps-priority':priority,'ps-status':status,'ps-notes':notes}))setPrivateField(key,value);
+  setPrivateField('ps-protected','',protectedValue);
+}
+fillPrivateStayForm({id:'anne-tim-oconomowoc',name:'Anne & Tim',phone:'+1 262-555-0100',street:'1190 N Griffith Road',city:'Oconomowoc',state:'WI',postcode:'53066',arrival:'2026-09-10',departure:'2026-09-15'});
+assert.equal(run('savePrivateStay()'),true);
+assert.equal(run("effectivePrivateStays().filter(stay=>stay.displayName==='Anne & Tim').length"),1,'editing the master does not duplicate Anne & Tim');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').phone"),'+1 262-555-0100');
+assert.match(run("privateStayContactCard(privateStayById('anne-tim-oconomowoc'))"),/href="tel:\+12625550100"/,'SAVE creates a Call action');
+run('privateStayUserData=loadPrivateStayUserData()');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').phone"),'+1 262-555-0100','saved phone survives a cold reload of the user-data layer');
+const savedFriendBytes=localStorage.getItem('dwajp-trip-private-stays-v1');
+run('resetEdits()');
+assert.equal(localStorage.getItem('dwajp-trip-private-stays-v1'),savedFriendBytes,'Reset Edits preserves real Friends/Family user data');
+fillPrivateStayForm({name:'Lauren & Brett',street:'User supplied street',city:'Ortonville',state:'MI',postcode:'00000',arrival:'2026-09-08',departure:'2026-09-10',notes:'Entered entirely in app'});
+assert.equal(run('savePrivateStay()'),true);
+assert.equal(run("privateStaysForDate('2026-09-08').some(stay=>stay.displayName==='Lauren & Brett')"),true);
+assert.equal(run("privateStaysForDate('2026-09-09').some(stay=>stay.displayName==='Lauren & Brett')"),true);
+assert.equal(run("privateStaysForDate('2026-09-10').some(stay=>stay.displayName==='Lauren & Brett')"),false,'departure remains exclusive for a user-created stay');
+assert.equal(run("alter2Affected('2026-09-09','test').locked"),true,'effective confirmed/protected user stay protects Alter Trip');
+run("globalThis.userStayImpact=analyseAlter2Request('Change the stay with Lauren & Brett')");
+assert.equal(context.userStayImpact.status,'RED');assert.match(context.userStayImpact.summary,/Lauren & Brett/,'Alter Trip identifies the effective Friends\/Family record by name');
+assert.match(run("printAccommodation(mergedDays().find(day=>day.date==='2026-09-09'))"),/Lauren &amp; Brett[\s\S]*User supplied street/,'print consumes the effective user-created record');
+assert.match(run("mapButtons(mergedDays().find(day=>day.date==='2026-09-09'))"),/User%20supplied%20street%2C%20Ortonville%2C%20MI%2000000%2C%20USA/,'Maps consumes the same structured address');
+fillPrivateStayForm({name:'Visit Only Friend',street:'Visit address',city:'Detroit',state:'MI',postcode:'00000',type:'VISIT_ONLY',arrival:'2026-09-07',departure:'2026-09-08',status:'CONFIRMED',protectedValue:true});
+assert.equal(run('savePrivateStay()'),true);
+assert.equal(run("privateStaysForDate('2026-09-07').some(stay=>stay.displayName==='Visit Only Friend')"),false,'visit-only never creates an occupied night');
+assert.equal(run("effectivePrivateStays().find(stay=>stay.displayName==='Visit Only Friend').protected"),false,'visit-only does not assume protection');
+run("showContacts(); globalThis.friendEditorContacts=document.getElementById('content').innerHTML");
+assert.match(context.friendEditorContacts,/\+ ADD FRIEND \/ FAMILY[\s\S]*Lauren &amp; Brett[\s\S]*EDIT/);
+assert.equal((context.friendEditorContacts.match(/Anne &amp; Tim/g)||[]).length,1,'Contacts has no duplicate Anne & Tim card');
+const userId=run("effectivePrivateStays().find(stay=>stay.displayName==='Visit Only Friend').id");
+assert.equal(run(`deletePrivateStay('${userId}')`),true,'explicit Delete removes a selected user-created record');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').displayName"),'Anne & Tim','deleting user data cannot remove the master record');
+run("delete privateStayUserData.overrides['anne-tim-oconomowoc']; for(const id of Object.keys(privateStayUserData.records))delete privateStayUserData.records[id]; localStorage.removeItem(PRIVATE_STAY_STORE); privateStayUserData=loadPrivateStayUserData(); renderHome(); globalThis.friendEditorCardCount=(document.getElementById('content').innerHTML.match(/<article class=\"card\"/g)||[]).length");
+assert.equal(context.friendEditorCardCount,57,'all 57 cards render after editor operations and master recovery');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').phone"),'','master Anne & Tim base remains recoverable');
+
 // A saved approved destination must be safe during the script's initial render,
 // before the later route-intelligence registry declarations have initialized.
 const startupElements = {};
