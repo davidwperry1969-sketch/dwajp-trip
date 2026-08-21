@@ -384,14 +384,33 @@ assert.match(context.alter2AppliedPlan, /Tijuana skipped/);
 assert.equal(run("state.days['2026-09-22']"), undefined);
 
 assert.equal(run("alter2ProtectedCommitments().filter(item=>item.multiNight).map(item=>item.date).join(',')"), '2026-09-22,2026-09-23', 'G. both nights of the booking are protected');
-run("globalThis.checkoutDeparture=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.occupiedNightDeparture=analyseAlter2Request('Leave New Orleans on 23 September and drive toward Texas')");
+run("globalThis.checkoutDepartureBefore=JSON.stringify(state); globalThis.checkoutDepartureStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutDeparture=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.checkoutDepartureAfter=JSON.stringify(state); globalThis.checkoutDepartureStorageAfter=JSON.stringify(localStorage.data); globalThis.occupiedNightDeparture=analyseAlter2Request('Leave New Orleans on 23 September and drive toward Texas')");
 assert.equal(context.checkoutDeparture.target, '2026-09-24');
 assert.notEqual(context.checkoutDeparture.status, 'RED', `24 Sep checkout/departure is not blocked by the 22–24 Sep accommodation booking: ${JSON.stringify(context.checkoutDeparture)}`);
 assert.doesNotMatch(context.checkoutDeparture.summary, /French Quarter|touch(?:es|ing) a protected/i);
 assert.equal(context.checkoutDeparture.affected.some(item => item.date === '2026-09-24' && item.locked), false);
+assert.equal(context.checkoutDeparture.kind, 'departure-travel');
+assert.equal(context.checkoutDeparture.scannedDays, 57, 'departure planning scans the complete current itinerary');
+assert.deepEqual([...context.checkoutDeparture.changes.map(change=>change.date)], ['2026-09-24','2026-09-25']);
+assert.deepEqual([...context.checkoutDeparture.routeLegs.map(leg=>`${leg.origin} -> ${leg.destination}`)], ['NEW ORLEANS -> Henderson, Louisiana','Henderson, Louisiana -> Mason, Texas']);
+assert.match(context.checkoutDeparture.changes[0].changes.plan, /30-ft RV[\s\S]*fuel[\s\S]*rest[\s\S]*setup/i);
+assert.doesNotMatch(context.checkoutDeparture.changes[0].changes.plan, /User-approved change:/i, 'the command is converted into a coherent travel day rather than appended verbatim');
+assert.equal(context.checkoutDeparture.changes[0].bookingContext.confirmation, '2026075827');
+assert.ok(context.checkoutDeparture.changes.every(change=>change.overnightOptions.length>=3));
+assert.ok(context.checkoutDeparture.changes.flatMap(change=>change.overnightOptions).every(option=>!/\bavailable\b|availability (?:is )?confirmed/i.test(option.detail||'')), 'suggestions do not claim verified availability');
+assert.equal(context.checkoutDeparture.affected.some(item=>item.date==='2026-09-26'), true, 'following Hill Country day is scanned for continuity without being rewritten');
+assert.equal(context.checkoutDepartureBefore, context.checkoutDepartureAfter, 'departure impact analysis does not mutate itinerary state');
+assert.equal(context.checkoutDepartureStorageBefore, context.checkoutDepartureStorageAfter, 'departure impact analysis does not write localStorage');
 assert.equal(context.occupiedNightDeparture.target, '2026-09-23');
 assert.equal(context.occupiedNightDeparture.status, 'RED', '23 Sep remains protected as an occupied booking night');
 assert.match(context.occupiedNightDeparture.summary, /protected commitment/i);
+run("state={}; localStorage.removeItem(STORE); document.getElementById('alter2Command').value='Leave New Orleans on 24 September and drive toward Texas'; globalThis.checkoutButtonStateBefore=JSON.stringify(state); globalThis.checkoutButtonStorageBefore=JSON.stringify(localStorage.data); submitAlter2Command(); globalThis.checkoutButtonImpact=alter2Pending; globalThis.checkoutButtonImpactHtml=document.getElementById('alterModal').innerHTML");
+assert.equal(context.checkoutButtonImpact.kind, 'departure-travel', 'the actual command-submit path invokes the flexible travel-day planner');
+assert.deepEqual([...context.checkoutButtonImpact.changes.map(change=>change.date)], ['2026-09-24','2026-09-25']);
+assert.doesNotMatch(context.checkoutButtonImpactHtml, /flexible date matched/i, 'Impact Result describes the constructed plan rather than a generic date match');
+assert.doesNotMatch(context.checkoutButtonImpact.changes.map(change=>change.changes.plan).join('\n'), /User-approved change:/i);
+assert.equal(run('JSON.stringify(state)'), context.checkoutButtonStateBefore);
+assert.equal(JSON.stringify(localStorage.data), context.checkoutButtonStorageBefore, 'command submission does not write localStorage');
 run("state={}; localStorage.removeItem(STORE); renderAlter2Analysis(analyseAlter2Request('Move the confirmed French Quarter accommodation.')); globalThis.alter2RedBefore=JSON.stringify(state); showAlter2FinalProposal(); globalThis.alter2RedApply=approveAlter2Changes(); globalThis.alter2RedAfter=JSON.stringify(state)");
 assert.equal(context.alter2RedApply, false);
 assert.equal(context.alter2RedAfter, context.alter2RedBefore);
@@ -428,6 +447,46 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(run('formatDrivingDuration(394)'), '6 hr 34 min');
   assert.equal(run('formatDrivingDuration(60)'), '1 hr');
   assert.equal(run('formatDrivingDuration(45)'), '45 min');
+
+  // A flexible checkout-day command is reconstructed into verified RV travel days before approval.
+  run("globalThis.checkoutTravel=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.checkoutTravelStateBefore=JSON.stringify(state); globalThis.checkoutTravelStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRouteCalls=[]; globalThis.checkoutRouteIntelligence={async resolveAsync({origin,destination}){globalThis.checkoutRouteCalls.push(origin.key+'>'+destination.key);let values={'new orleans>henderson':[210.4,145],'henderson>mason':[690.2,440]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  const checkoutRouteStatus = await run("verifyAlter2Routes(globalThis.checkoutTravel,{routeIntelligence:globalThis.checkoutRouteIntelligence})");
+  assert.equal(checkoutRouteStatus.status, 'verified');
+  assert.deepEqual(Array.from(context.checkoutRouteCalls), ['new orleans>henderson','henderson>mason'], 'both proposed legs use validated endpoints through route intelligence');
+  assert.deepEqual(Array.from(checkoutRouteStatus.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['NEW ORLEANS','Henderson, Louisiana',210.4,145,'GREEN'],['Henderson, Louisiana','Mason, Texas',690.2,440,'YELLOW']]);
+  assert.equal(run('alter2ApprovalReady(globalThis.checkoutTravel)'), true, 'only the fully verified non-RED departure sequence becomes approval-ready');
+  const checkoutReview = run('renderAlter2ChangeRows(globalThis.checkoutTravel)');
+  assert.equal((checkoutReview.match(/class="findOption alter2-diff"/g)||[]).length, 2, 'review lists exactly the two proposed changed days');
+  assert.match(checkoutReview, /Thu 24 Sep — NEW ORLEANS → Henderson, Louisiana[\s\S]*210\.4 km[\s\S]*2 hr 25 min[\s\S]*GREEN/);
+  assert.match(checkoutReview, /Fri 25 Sep — Henderson, Louisiana → Mason, Texas[\s\S]*690\.2 km[\s\S]*7 hr 20 min[\s\S]*YELLOW/);
+  assert.match(checkoutReview, /CONFIRMED \/ BOOKED — UNCHANGED[\s\S]*French Quarter RV Resort[\s\S]*Confirmation 2026075827/);
+  assert.match(checkoutReview, /OVERNIGHT OPTIONS — SUGGESTED \/ NOT BOOKED/);
+  assert.match(checkoutReview, /Availability has not been verified[\s\S]*30-ft RV/);
+  assert.match(checkoutReview, /CHECK BEFORE ARRIVAL/);
+  assert.doesNotMatch(checkoutReview, /availability (?:is )?confirmed/i);
+  assert.equal(run("state.days&&state.days['2026-09-24']"), undefined, 'verified review does not write the checkout day');
+  assert.equal(run("state.days&&state.days['2026-09-25']"), undefined, 'verified review does not write the following day');
+  assert.equal(run('JSON.stringify(state)'), context.checkoutTravelStateBefore);
+  assert.equal(JSON.stringify(localStorage.data), context.checkoutTravelStorageBefore, 'verified departure review does not write localStorage');
+  assert.equal(run("DAYS.find(day=>day.date==='2026-09-22').status"), 'CONFIRMED');
+  assert.equal(run("DAYS.find(day=>day.date==='2026-09-23').status"), 'CONFIRMED');
+
+  // The MAKE A CHANGE runtime boundary reconstructs stale generic state, then renders that plan.
+  run("state={}; localStorage.removeItem(STORE); globalThis.checkoutRuntimeBefore=JSON.stringify(state); globalThis.checkoutRuntimeStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRuntimeCommand='Leave New Orleans on 24 September and drive toward Texas'; alter2Pending={...analyseAlter2Request(globalThis.checkoutRuntimeCommand),kind:'direct',summary:'The flexible date matched.',changes:[{date:'2026-09-24',changes:{plan:'User-approved change: '+globalThis.checkoutRuntimeCommand+'\\nUser-approved change: '+globalThis.checkoutRuntimeCommand},reason:'Matched flexible date.'}],routeLegs:[],requiresRouteVerification:false,routeVerification:null}; globalThis.checkoutRuntimeCalls=[]; RouteIntelligence.setProvider({async routeAsync({origin,destination}){globalThis.checkoutRuntimeCalls.push(origin.key+'>'+destination.key);let values={'new orleans>henderson':[210.4,145],'henderson>mason':[690.2,440]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); showAlter2FinalProposal(); globalThis.checkoutRuntimeInitialHtml=document.getElementById('alterModal').innerHTML");
+  await new Promise(resolve => setImmediate(resolve));
+  run("globalThis.checkoutRuntimeReview=renderAlter2ChangeRows(alter2Pending); globalThis.checkoutRuntimeKind=alter2Pending.kind; globalThis.checkoutRuntimeDates=alter2Pending.changes.map(change=>change.date); globalThis.checkoutRuntimeReady=alter2ApprovalReady(alter2Pending)");
+  assert.equal(context.checkoutRuntimeKind, 'departure-travel', 'MAKE A CHANGE cannot carry stale generic analysis into Review Before Approval');
+  assert.deepEqual([...context.checkoutRuntimeDates], ['2026-09-24','2026-09-25']);
+  assert.deepEqual([...context.checkoutRuntimeCalls.filter(call=>call==='new orleans>henderson'||call==='henderson>mason')], ['new orleans>henderson','henderson>mason'], 'the constructed checkout legs are the routes sent for verification');
+  assert.match(context.checkoutRuntimeInitialHtml, /Review Before Approval[\s\S]*START:[\s\S]*NEW ORLEANS[\s\S]*DESTINATION \/ STOPPING AREA:[\s\S]*Henderson, Louisiana/);
+  assert.match(context.checkoutRuntimeReview, /ROUTE:[\s\S]*NEW ORLEANS → Henderson, Louisiana[\s\S]*DISTANCE:[\s\S]*210\.4 km[\s\S]*DRIVING TIME:[\s\S]*2 hr 25 min/);
+  assert.match(context.checkoutRuntimeReview, /PADDED RV TRAVEL:[\s\S]*fuel, rest and setup allowance[\s\S]*PRESSURE:[\s\S]*GREEN/i);
+  assert.match(context.checkoutRuntimeReview, /selected as a validated, manageable first stopping area toward Texas Hill Country[\s\S]*protected commitments/i);
+  assert.match(context.checkoutRuntimeReview, /OVERNIGHT OPTIONS — SUGGESTED \/ NOT BOOKED/);
+  assert.doesNotMatch(context.checkoutRuntimeReview, /User-approved change:/i, 'Review renders the constructed travel plan instead of appending the command');
+  assert.equal(context.checkoutRuntimeReady, true);
+  assert.equal(run('JSON.stringify(state)'), context.checkoutRuntimeBefore);
+  assert.equal(JSON.stringify(localStorage.data), context.checkoutRuntimeStorageBefore, 'MAKE A CHANGE and route review do not write localStorage');
 
   // Alter Trip 2.0 final review gates approval on every changed route leg.
   run("state={}; localStorage.removeItem(STORE); globalThis.reviewAnalysis=analyseAlter2Request('Stay another night in Milwaukee.'); renderAlter2Analysis(globalThis.reviewAnalysis); globalThis.pendingStateBefore=JSON.stringify(state); globalThis.pendingStorageBefore=JSON.stringify(localStorage.data); globalThis.pendingRouteResolvers=[]; RouteIntelligence.setProvider({routeAsync(){return new Promise(resolve=>globalThis.pendingRouteResolvers.push(resolve))}}); showAlter2FinalProposal(); globalThis.pendingReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.pendingApply=approveAlter2Changes()");
