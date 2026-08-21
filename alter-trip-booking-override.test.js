@@ -51,6 +51,15 @@ assert.strictEqual(api.findBlockingBookings([frenchQuarter],'2026-09-23','2026-0
 assert.strictEqual(api.findBlockingBookings([frenchQuarter],'2026-09-24','2026-09-24').length, 0);
 assert.strictEqual(api.chooseBlockingBookings([frenchQuarter],'2026-09-23','Leave New Orleans on 23 September',[frenchQuarter]).length, 1);
 assert.strictEqual(api.chooseBlockingBookings([frenchQuarter],'2026-09-24','Leave New Orleans on 24 September and drive toward Texas',[]).length, 0, 'departure wording does not turn checkout into a booking collision');
+const protectedDepartureCommand = 'Leave New Orleans on 23 September and drive toward Texas.';
+const protectedDepartureBlockers = api.chooseBlockingBookings([frenchQuarter], '2026-09-23', protectedDepartureCommand, [frenchQuarter]);
+const protectedDepartureCopy = api.solutionCopy({request:protectedDepartureCommand}, protectedDepartureBlockers);
+assert.strictEqual(protectedDepartureBlockers.length, 1);
+assert.strictEqual(protectedDepartureBlockers[0].name, 'French Quarter RV Resort');
+assert.ok(protectedDepartureCopy.some(line=>line.includes('French Quarter RV Resort')), 'RED impact names the affected protected booking');
+assert.ok(protectedDepartureCopy.some(line=>/review.*before releasing/i.test(line)), 'RED directs the user through explicit protected-booking release');
+assert.ok(protectedDepartureCopy.some(line=>/will not change a real reservation/i.test(line)), 'release explanation preserves the real confirmed booking');
+assert.ok(protectedDepartureCopy.some(line=>/leave the trip unchanged/i.test(line)), 'LEAVE IT remains a clear unchanged option');
 
 const normalMatch = api.chooseBlockingBookings(
   bookings,

@@ -477,6 +477,35 @@ assert.equal(run("DAYS.find(day=>day.date==='2026-09-22').status"), 'CONFIRMED',
 assert.equal(run("DAYS.find(day=>day.date==='2026-09-23').status"), 'CONFIRMED', 'J. second New Orleans booked night remains confirmed');
 assert.match(run("DAYS.find(day=>day.date==='2026-09-22').plan"), /Confirmation 2026075827/);
 assert.match(run("DAYS.find(day=>day.date==='2026-09-23').plan"), /Confirmation 2026075827/);
+
+// A departure requested during the second occupied French Quarter night is RED
+// until the separate protected-booking release flow is explicitly completed.
+run("state={}; localStorage.removeItem(STORE); globalThis.fq23Command='Leave New Orleans on 23 September and drive toward Texas.'; globalThis.fq23StateBefore=JSON.stringify(state); globalThis.fq23StorageBefore=JSON.stringify(localStorage.data); globalThis.fq23BookingsBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.fq23Analysis=analyseAlter2Request(globalThis.fq23Command); globalThis.fq23StateAfterScan=JSON.stringify(state); globalThis.fq23StorageAfterScan=JSON.stringify(localStorage.data)");
+assert.equal(context.fq23Analysis.status, 'RED');
+assert.equal(context.fq23Analysis.target, '2026-09-23');
+assert.deepEqual([...context.fq23Analysis.affected.map(item=>item.date)], ['2026-09-23']);
+assert.equal(context.fq23Analysis.affected[0].locked, true, '23 Sep is identified as a protected occupied night');
+assert.equal(run("!!confirmedBookingNight('2026-09-22')"), true);
+assert.equal(run("!!confirmedBookingNight('2026-09-23')"), true);
+assert.equal(run("!!confirmedBookingNight('2026-09-24')"), false, '24 Sep remains checkout/departure');
+assert.match(run("CONFIRMED_BOOKING_WINDOWS.find(item=>item.checkIn==='2026-09-22'&&item.checkOut==='2026-09-24').name"), /French Quarter RV Resort/);
+assert.equal(context.fq23StateAfterScan, context.fq23StateBefore, 'command entry and impact scan do not mutate itinerary state');
+assert.equal(context.fq23StorageAfterScan, context.fq23StorageBefore, 'command entry and impact scan do not mutate localStorage');
+run("renderAlter2Analysis(globalThis.fq23Analysis); globalThis.fq23ImpactHtml=document.getElementById('alterModal').innerHTML; globalThis.fq23StateAfterImpact=JSON.stringify(state); showAlter2FinalProposal(); globalThis.fq23ReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.fq23Ready=alter2ApprovalReady(globalThis.fq23Analysis); globalThis.fq23Approval=approveAlter2Changes(); globalThis.fq23StateAfterReview=JSON.stringify(state); globalThis.fq23StorageAfterReview=JSON.stringify(localStorage.data)");
+assert.match(context.fq23ImpactHtml, /RED[\s\S]*Wed 23 Sep[\s\S]*PROTECTED COMMITMENT/);
+assert.equal(context.fq23Ready, false, 'MAKE A CHANGE cannot become approvable before protected-booking release');
+assert.equal(context.fq23Approval, false, 'approval is blocked before protected-booking release');
+assert.match(context.fq23ReviewHtml, /RED: protected commitments cannot be changed automatically[\s\S]*APPROVE CHANGES/);
+assert.equal(context.fq23StateAfterImpact, context.fq23StateBefore);
+assert.equal(context.fq23StateAfterReview, context.fq23StateBefore, 'impact, repair/review and blocked approval leave state unchanged');
+assert.equal(context.fq23StorageAfterReview, context.fq23StorageBefore, 'impact, repair/review and blocked approval leave localStorage unchanged');
+run("renderAlter2Analysis(globalThis.fq23Analysis); leaveAlter2(); renderHome(); globalThis.fq23AfterLeaveState=JSON.stringify(state); globalThis.fq23AfterLeaveStorage=JSON.stringify(localStorage.data); globalThis.fq23Cards=(document.getElementById('content').innerHTML.match(/<article class=\"card/g)||[]).length; globalThis.fq23BookingsAfter=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); resetEdits(); globalThis.fq23Reset23=mergedDays().find(day=>day.date==='2026-09-23')");
+assert.equal(context.fq23AfterLeaveState, context.fq23StateBefore, 'LEAVE IT exits with itinerary state unchanged');
+assert.equal(context.fq23AfterLeaveStorage, context.fq23StorageBefore, 'LEAVE IT exits with localStorage unchanged');
+assert.equal(context.fq23Cards, 57, 'all 57 itinerary day cards still render after leaving the RED request');
+assert.equal(context.fq23BookingsAfter, context.fq23BookingsBefore, 'confirmed booking definitions remain byte-for-byte unchanged');
+assert.match(context.fq23Reset23.plan, /French Quarter RV Resort[\s\S]*Confirmation 2026075827/, 'Reset Edits still restores the protected master itinerary');
+
 assert.match(html, /\.alter2-grid\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(250px,1fr\)\)/, 'Alter Trip 2.0 is responsive on desktop/tablet');
 assert.match(html, /@media\(max-width:720px\)\{\.alter2-grid\{grid-template-columns:1fr\}/, 'Alter Trip 2.0 collapses safely on phones');
 assert.match(html, /\.alter2-warning\{[^}]*display:block[^}]*width:100%[^}]*max-width:100%[^}]*height:auto[^}]*white-space:normal[^}]*overflow-wrap:anywhere[^}]*line-height:1\.4[^}]*padding:10px/, 'Alter Trip warnings expand, wrap and retain padding at desktop/tablet widths');
