@@ -42,6 +42,11 @@ assert.match(privateStayCard, /PRIVATE STAY — FRIENDS &amp; FAMILY[\s\S]*Anne 
 assert.match(privateStayCard, /query=1190%20N%20Griffith%20Road%2C%20Oconomowoc%2C%20WI%2053066%2C%20USA/);
 assert.doesNotMatch(privateStayCard, /private-stay-call/, 'Call is omitted until a phone exists');
 assert.doesNotMatch(run("dayCard(mergedDays().find(day=>day.date==='2026-09-15'))"), /data-private-stay-id/, 'departure day has no occupied-stay panel');
+const sep11MapButtons=run("mapButtons(mergedDays().find(day=>day.date==='2026-09-11'))");
+assert.match(sep11MapButtons,/contact-address-map[^>]*href="https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=1190%20N%20Griffith%20Road%2C%20Oconomowoc%2C%20WI%2053066%2C%20USA"/,'11 Sep Contact/address uses the canonical structured address');
+assert.doesNotMatch(sep11MapButtons,/query=Anne%20%26%20Tim|Private%20stay%20details%20below/,'private-stay Contact/address never searches the free-text contact label');
+const sep15MapButtons=run("mapButtons(mergedDays().find(day=>day.date==='2026-09-15'))");
+assert.doesNotMatch(sep15MapButtons,/1190%20N%20Griffith%20Road/,'15 Sep remains outside private-stay address resolution');
 run('showContacts(); globalThis.privateStayContacts=document.getElementById("content").innerHTML');
 assert.match(context.privateStayContacts, /PRIVATE STAY \/ FRIENDS &amp; FAMILY[\s\S]*Anne &amp; Tim[\s\S]*1190 N Griffith Road/);
 assert.doesNotMatch(context.privateStayContacts, /private-stay-call/);
