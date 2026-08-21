@@ -43,6 +43,44 @@ assert.equal((startupMarkup.match(/<article class="card"/g) || []).length, 57, '
 assert.match(startupMarkup, /Winnie, Texas RV park \/ campground search/, 'initial approved Winnie card uses its current destination suggestions');
 assert.equal(startupStorage.data['dwajp-trip-v5'], JSON.stringify({ days: { '2026-09-24': { dest: 'NEW ORLEANS → Winnie, Texas', dest_query: 'Winnie, Texas' }, '2026-09-25': { dest: 'Winnie, Texas → Mason, Texas', dest_query: 'Mason, Texas' } } }), 'startup rendering does not overwrite saved Alter Trip state');
 
+// A cold app start must reconcile legacy/incomplete approved overrides at render
+// time without rewriting the already-persisted state.
+const persistedNashvilleState = { days: { '2026-09-19': {
+  dest: 'NASHVILLE → MEMPHIS', weather: '17–27°C • 332.4 km', status: 'MUST DO',
+  plan: 'MUST: Graceland drive-through / stop • Continue toward Bristol',
+  detour: 'Optional Bristol town / speedway only',
+  contact: 'Bristol Motor Speedway\n151 Speedway Blvd\n+1 423-989-6900',
+  dest_query: 'MEMPHIS', maps: 'https://www.google.com/maps/search/?api=1&query=MEMPHIS',
+  route_maps: 'https://www.google.com/maps/dir/?api=1&origin=NASHVILLE&destination=MEMPHIS',
+  verifiedRoute: { distanceKm: 332.4, durationMinutes: 189, pressure: 'GREEN', verification: 'verified', routeSequence: ['NASHVILLE','MEMPHIS'], legs: [{ origin: 'NASHVILLE', destination: 'MEMPHIS', distanceKm: 332.4, durationMinutes: 189, pressure: 'GREEN' }] }
+}, '2026-09-20': { dest: 'MEMPHIS → Birmingham' }, '2026-09-21': { dest: 'Birmingham → NEW ORLEANS' } } };
+const persistedStartupElements = {};
+const persistedStartupBytes = JSON.stringify(persistedNashvilleState);
+const persistedStartupStorage = { data: { 'dwajp-trip-v5': persistedStartupBytes }, getItem(key) { return this.data[key] || null }, setItem(key, value) { this.data[key] = value }, removeItem(key) { delete this.data[key] } };
+const persistedStartupContext = {
+  alert() {}, confirm: () => true, localStorage: persistedStartupStorage, window: { addEventListener() {}, scrollTo() {}, print() {} },
+  document: { body: { classList: { add() {}, remove() {} } }, getElementById(id) { return persistedStartupElements[id] || (persistedStartupElements[id] = makeElement()) }, querySelectorAll() { return [] }, querySelector() { return null }, documentElement: { style: { setProperty() {} } } },
+  requestAnimationFrame: fn => fn(), encodeURIComponent, JSON, String, Date, Set, Math, parseInt
+};
+vm.createContext(persistedStartupContext);
+assert.doesNotThrow(() => vm.runInContext(script, persistedStartupContext), 'persisted approved extra-Nashville state renders through normal startup');
+const persistedStartupMarkup = persistedStartupContext.document.getElementById('content').innerHTML;
+const persistedSep19Card = persistedStartupMarkup.match(/<article class="card" id="day-2026-09-19">[\s\S]*?<\/article>/)[0];
+assert.equal((persistedStartupMarkup.match(/<article class="card"/g) || []).length, 57, 'all 57 cards render from persisted approved state');
+assert.match(persistedSep19Card, /NASHVILLE → MEMPHIS[\s\S]*332\.4 km[\s\S]*3 hr 9 min[\s\S]*VERIFIED[\s\S]*GREEN/);
+assert.match(persistedSep19Card, /Graceland/i, 'MUST Graceland survives persisted-state reconciliation');
+assert.doesNotMatch(persistedSep19Card, /Bristol|Bristol Motor Speedway|151 Speedway Blvd|423-989-6900/i, 'all stale dropped-destination details are absent after a cold load');
+assert.match(persistedSep19Card, /MEMPHIS[\s\S]*Travel stop information — verify locally/i, 'safe destination-aware contact content replaces stale Bristol contact data');
+assert.match(persistedSep19Card, /Memphis RV park \/ campground search/i, 'overnight suggestions remain Memphis-targeted');
+assert.match(persistedStartupMarkup, /Sun 20 Sep[\s\S]*MEMPHIS → Birmingham[\s\S]*Mon 21 Sep[\s\S]*Birmingham → NEW ORLEANS/);
+assert.equal(persistedStartupStorage.data['dwajp-trip-v5'], persistedStartupBytes, 'normal startup rendering leaves persisted localStorage byte-for-byte unchanged');
+assert.equal(vm.runInContext('JSON.stringify(state)', persistedStartupContext), persistedStartupBytes, 'normal startup rendering leaves in-memory state byte-for-byte unchanged');
+vm.runInContext("resetEdits(); globalThis.persistedReset19=mergedDays().find(day=>day.date==='2026-09-19')", persistedStartupContext);
+assert.equal(persistedStartupStorage.data['dwajp-trip-v5'], undefined, 'Reset Edits removes the persisted approved override');
+assert.match(persistedStartupContext.persistedReset19.plan, /Bass Pro Shops Night Race target/i, 'Reset Edits restores the original Bristol plan exactly from master data');
+assert.match(persistedStartupContext.persistedReset19.detour, /Bristol town \/ speedway/i, 'Reset Edits restores the original Bristol detour');
+assert.match(persistedStartupContext.persistedReset19.contact, /Bristol Motor Speedway[\s\S]*151 Speedway Blvd[\s\S]*423-989-6900/i, 'Reset Edits restores the original Bristol contact');
+
 // A failure in one optional day-card helper is isolated to that date.
 const renderGuardState = JSON.stringify({ days: { '2026-09-24': { dest: 'NEW ORLEANS → Winnie, Texas', dest_query: 'Winnie, Texas' }, '2026-09-25': { dest: 'Winnie, Texas → Mason, Texas', dest_query: 'Mason, Texas' } } });
 run(`state=${renderGuardState}; localStorage.setItem(STORE,JSON.stringify(state)); renderHome(); globalThis.renderGuardNormal=document.getElementById('content').innerHTML; globalThis.renderGuardOriginal=overnightSuggestions`);
