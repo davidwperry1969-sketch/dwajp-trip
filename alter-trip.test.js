@@ -735,13 +735,13 @@ async function runRouteIntelligenceAsyncTests() {
 
   // Each later command derives its location from its own wording and the
   // currently approved itinerary, never from the previous Alter Trip request.
-  run("globalThis.afterMilwaukeeState=JSON.stringify(state); globalThis.afterMilwaukeeStorage=JSON.stringify(localStorage.data); globalThis.stalePreviousAnalysis=globalThis.verifiedReview; alter2Pending=globalThis.stalePreviousAnalysis; globalThis.nashvilleFresh=analyseAlter2Request('Stay one extra night in Nashville'); globalThis.afterNashvilleAnalysisState=JSON.stringify(state); globalThis.afterNashvilleAnalysisStorage=JSON.stringify(localStorage.data)");
+  run("globalThis.afterMilwaukeeState=JSON.stringify(state); globalThis.afterMilwaukeeStorage=JSON.stringify(localStorage.data); globalThis.nashvilleProtectedBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.nashvilleMasterProtectedBefore=JSON.stringify(DAYS.filter(day=>day.date>='2026-09-22'&&day.date<='2026-09-23')); globalThis.stalePreviousAnalysis=globalThis.verifiedReview; alter2Pending=globalThis.stalePreviousAnalysis; globalThis.nashvilleFresh=analyseAlter2Request('I want an extra day in Nashville. Make it work without changing any confirmed bookings.'); globalThis.afterNashvilleAnalysisState=JSON.stringify(state); globalThis.afterNashvilleAnalysisStorage=JSON.stringify(localStorage.data)");
   assert.equal(context.nashvilleFresh.target, '2026-09-16', 'the current Nashville arrival is the new command anchor');
   assert.equal(context.nashvilleFresh.affected[0].date, '2026-09-16');
   assert.equal(context.nashvilleFresh.affected.at(-1).date, '2026-09-22', 'analysis scans to the next genuine protected commitment');
   assert.ok(context.nashvilleFresh.affected.every(item => item.date >= '2026-09-16'), 'earlier Milwaukee days are excluded');
   assert.match(context.nashvilleFresh.summary, /extra night in nashville/i);
-  assert.equal(context.nashvilleFresh.request, 'Stay one extra night in Nashville');
+  assert.equal(context.nashvilleFresh.request, 'I want an extra day in Nashville. Make it work without changing any confirmed bookings.');
   assert.equal(context.nashvilleFresh.routeVerification, undefined, 'previous route verification state is not inherited');
   assert.ok(context.nashvilleFresh.routeLegs.length > 0, 'shifted driving legs enter the existing verification stage');
   assert.equal(context.nashvilleFresh.proposalValidation.valid, true, 'the completed Nashville sequence is coherent before review');
@@ -824,12 +824,18 @@ async function runRouteIntelligenceAsyncTests() {
   assert.match(html, /#alterModal \.btn\{min-height:44px/);
   assert.match(html, /@media\(max-width:720px\)[\s\S]*\.alter2-grid\{grid-template-columns:1fr\}/, 'phone repair cards stack naturally');
   assert.equal(run('alter2ApprovalReady(globalThis.nashvilleFresh)'), false, 'unrepaired RED proposal has no approval path');
-  run("alter2Pending=globalThis.nashvilleFresh; globalThis.bufferRepairIndex=globalThis.nashvilleFresh.repairs.findIndex(option=>option.id==='use-buffer'); globalThis.repairSelected=selectAlter2Repair(globalThis.bufferRepairIndex); globalThis.selectedRepairReady=alter2ApprovalReady(globalThis.nashvilleFresh); globalThis.stateAfterRepairSelection=JSON.stringify(state); globalThis.storageAfterRepairSelection=JSON.stringify(localStorage.data); delete globalThis.nashvilleFresh.selectedRepairIndex");
+  run("alter2Pending=globalThis.nashvilleFresh; showAlter2FinalProposal(); globalThis.bufferRepairIndex=globalThis.nashvilleFresh.repairs.findIndex(option=>option.id==='use-buffer'); globalThis.repairSelected=selectAlter2Repair(globalThis.bufferRepairIndex); globalThis.selectedRepairReady=alter2ApprovalReady(globalThis.nashvilleFresh); globalThis.selectedRepairReview=document.getElementById('alter2ChangeRows').innerHTML; globalThis.stateAfterRepairSelection=JSON.stringify(state); globalThis.storageAfterRepairSelection=JSON.stringify(localStorage.data); delete globalThis.nashvilleFresh.selectedRepairIndex");
   assert.equal(context.repairSelected, true);
   assert.equal(context.selectedRepairReady, true, 'only a selected fully verified repair exposes approval readiness');
   assert.equal(context.stateAfterRepairSelection, context.afterMilwaukeeState, 'repair selection does not mutate itinerary state');
   assert.equal(context.storageAfterRepairSelection, context.afterMilwaukeeStorage, 'repair selection does not write localStorage');
-  run("alter2Pending=globalThis.nashvilleFresh; selectAlter2Repair(globalThis.bufferRepairIndex); globalThis.repairReviewPlan=alter2SelectedRepair(globalThis.nashvilleFresh).changes[0].changes.plan; globalThis.safeRepairApplied=approveAlter2Changes(); globalThis.committedRepairPlans=Object.values(state.days).map(day=>day.plan||'').join('\\n'); globalThis.committedRepairStorage=localStorage.getItem(STORE)");
+  assert.match(context.selectedRepairReview, /Fri 18 Sep — nashville[\s\S]*extra night in nashville/i, 'selected review shows the concrete added Nashville day');
+  assert.match(context.selectedRepairReview, /Sat 19 Sep — NASHVILLE → MEMPHIS[\s\S]*332\.4 km[\s\S]*3 hr 10 min[\s\S]*PADDED RV TRAVEL:[\s\S]*4 hr 45 min[\s\S]*GREEN/i);
+  assert.match(context.selectedRepairReview, /Sun 20 Sep — MEMPHIS → Birmingham[\s\S]*370\.2 km[\s\S]*3 hr 30 min[\s\S]*PADDED RV TRAVEL:[\s\S]*5 hr 10 min[\s\S]*GREEN/i);
+  assert.match(context.selectedRepairReview, /Mon 21 Sep — Birmingham → NEW ORLEANS[\s\S]*538\.7 km[\s\S]*4 hr 51 min[\s\S]*PADDED RV TRAVEL:[\s\S]*6 hr 50 min[\s\S]*YELLOW/i);
+  assert.match(context.selectedRepairReview, /OPTIONAL stop removed: BRISTOL/i, 'day-by-day review explicitly discloses the sacrificed OPTIONAL Bristol stop');
+  assert.doesNotMatch(context.selectedRepairReview, /Tue 22 Sep/, 'the protected New Orleans check-in day is not proposed for write-back');
+  run("alter2Pending=globalThis.nashvilleFresh; selectAlter2Repair(globalThis.bufferRepairIndex); globalThis.repairReviewPlan=alter2SelectedRepair(globalThis.nashvilleFresh).changes[0].changes.plan; globalThis.safeRepairApplied=approveAlter2Changes(); globalThis.committedRepairPlans=Object.values(state.days).map(day=>day.plan||'').join('\\n'); globalThis.committedRepairStorage=localStorage.getItem(STORE); globalThis.nashvilleProtectedAfter=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.nashvilleMasterProtectedAfter=JSON.stringify(DAYS.filter(day=>day.date>='2026-09-22'&&day.date<='2026-09-23')); globalThis.nashvilleApprovedCards=(document.getElementById('content').innerHTML.match(/<article class=\"card/g)||[]).length");
   assert.match(context.repairReviewPlan, /PROPOSED ONLY/i, 'proposal-only wording remains visible in repair review before approval');
   assert.equal(context.safeRepairApplied, true, 'the selected fully verified non-RED repair can be approved');
   assert.doesNotMatch(context.committedRepairPlans, /PROPOSED ONLY/i, 'approved repair write-back removes proposal-only wording');
@@ -839,6 +845,12 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(run("mergedDays().find(day=>day.date==='2026-09-23').status"), 'CONFIRMED');
   assert.equal(run("state.days['2026-09-22']"), undefined, 'repair approval does not write the confirmed check-in night');
   assert.equal(run("state.days['2026-09-23']"), undefined, 'repair approval does not write the confirmed second night');
+  assert.equal(context.nashvilleProtectedAfter, context.nashvilleProtectedBefore, 'confirmed booking windows remain byte-for-byte unchanged');
+  assert.equal(context.nashvilleMasterProtectedAfter, context.nashvilleMasterProtectedBefore, '22 Sep onward protected master fields remain byte-for-byte unchanged');
+  assert.equal(context.nashvilleApprovedCards, 57, 'all 57 itinerary cards render after approval');
+  run("resetEdits(); globalThis.nashvilleReset18=mergedDays().find(day=>day.date==='2026-09-18'); globalThis.nashvilleReset22=mergedDays().find(day=>day.date==='2026-09-22')");
+  assert.match(context.nashvilleReset18.dest, /NASHVILLE → MEMPHIS → BRISTOL/, 'Reset Edits restores the original master route');
+  assert.equal(context.nashvilleReset22.status, 'CONFIRMED');
   run("state=JSON.parse(globalThis.afterMilwaukeeState); localStorage.data=JSON.parse(globalThis.afterMilwaukeeStorage); delete globalThis.nashvilleFresh.selectedRepairIndex");
   run("alter2Pending=globalThis.nashvilleFresh; globalThis.extremeNashvilleApply=approveAlter2Changes()");
   assert.equal(context.extremeNashvilleApply, false, 'an extreme verified route cannot be approved silently');
