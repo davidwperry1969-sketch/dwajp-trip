@@ -93,6 +93,8 @@ vm.createContext(vegasColdContext);
 assert.doesNotThrow(() => vm.runInContext(script, vegasColdContext), 'app cold-starts with the current persisted override before Las Vegas analysis');
 vm.runInContext("globalThis.vegasColdAnalysis=analyseAlter2Request('I want to stay an extra day in Las Vegas. Make it work without changing any confirmed bookings or MUST DO items.')", vegasColdContext);
 assert.equal(vegasColdContext.vegasColdAnalysis.proposalValidation.valid, true, 'cold-start proposal uses the consistent compressed repair');
+vm.runInContext("globalThis.yellowstoneColdAnalysis=analyseAlter2Request('I want an extra day in Yellowstone. Make it work without changing any confirmed bookings or MUST DO items.')", vegasColdContext);
+assert.match(vegasColdContext.yellowstoneColdAnalysis.summary, /cannot be fitted safely/i, 'cold-start persisted state produces the truthful Yellowstone no-safe-fit result');
 assert.equal(vegasColdStorage.data['dwajp-trip-v5'], vegasColdBytes, 'cold-start Las Vegas analysis leaves saved overrides byte-for-byte unchanged');
 assert.equal((vegasColdContext.document.getElementById('content').innerHTML.match(/<article class="card"/g) || []).length, 57, 'cold-start persisted itinerary still renders all 57 cards');
 
@@ -1097,6 +1099,31 @@ async function runRouteIntelligenceAsyncTests() {
   assert.doesNotMatch(encodedAssessment, /80 minutes/);
   const wedAnalysis = await run("analyseTripChangeWithRouteIntelligence(\"We don't need to get to Milwaukee until later on Friday.\")");
   assert.equal(wedAnalysis.routeAssessments.some(item => item.day.date === '2026-09-09'), false, 'Wed 9 Sep is a local Ortonville/Detroit excursion, not an intercity route for verification');
+
+  // Exact Yellowstone regression: the only repeated local Seattle days carry a
+  // timed target and return-preparation duty, so neither is silently sacrificed.
+  run("state={days:{'2026-09-24':{dest:'NEW ORLEANS → Winnie, Texas',dest_query:'Winnie, Texas'}}}; localStorage.setItem(STORE,JSON.stringify(state)); globalThis.yellowstoneStateBefore=JSON.stringify(state); globalThis.yellowstoneStorageBefore=localStorage.getItem(STORE); globalThis.yellowstoneBookingsBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.yellowstoneMustBefore=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); globalThis.yellowstoneAnalysis=analyseAlter2Request('I want an extra day in Yellowstone. Make it work without changing any confirmed bookings or MUST DO items.')");
+  assert.equal(context.yellowstoneAnalysis.scannedDays, 57);
+  assert.equal(context.yellowstoneAnalysis.target, '2026-10-13');
+  assert.deepEqual(Array.from(context.yellowstoneAnalysis.solverDetails.rejectedFullShiftValidation.issues), ['2026-10-18: plan/contact metadata does not match the proposed route','2026-10-19: plan/contact metadata does not match the proposed route'], 'the regression records the exact Yellowstone full-shift metadata failures');
+  assert.deepEqual(Array.from(context.yellowstoneAnalysis.solverDetails.sacrificeSearch.timed.map(item=>item.date)), ['2026-10-18','2026-10-19'], 'both apparent Seattle local-day candidates are recognised as timed duties');
+  assert.equal(context.yellowstoneAnalysis.solverDetails.sacrificeSearch.candidate, null, 'no genuine OPTIONAL, buffer or rest sacrifice exists in the short window');
+  assert.equal(context.yellowstoneAnalysis.changes.length, 0);
+  assert.equal(context.yellowstoneAnalysis.routeLegs.length, 0, 'no invented repair legs are sent for verification');
+  assert.match(context.yellowstoneAnalysis.summary, /cannot be fitted safely[\s\S]*No eligible OPTIONAL, buffer or rest day/i);
+  assert.match(context.yellowstoneAnalysis.affected.find(item=>item.date==='2026-10-18').reason, /Timed event/i);
+  assert.match(context.yellowstoneAnalysis.affected.find(item=>item.date==='2026-10-19').reason, /preparation/i);
+  assert.match(context.yellowstoneAnalysis.affected.find(item=>item.date==='2026-10-20').reason, /protected commitment/i);
+  assert.ok(!run('alter2ApprovalReady(globalThis.yellowstoneAnalysis)'), 'a truthful no-safe-fit result cannot be approved');
+  run("alter2Pending=globalThis.yellowstoneAnalysis; showAlter2FinalProposal(); globalThis.yellowstoneReview=document.getElementById('alterModal').innerHTML; globalThis.yellowstoneApproval=approveAlter2Changes(); globalThis.yellowstoneStateAfter=JSON.stringify(state); globalThis.yellowstoneStorageAfter=localStorage.getItem(STORE); globalThis.yellowstoneCards=(document.getElementById('content').innerHTML.match(/<article class=\"card/g)||[]).length; globalThis.yellowstoneBookingsAfter=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.yellowstoneMustAfter=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO'))");
+  assert.match(context.yellowstoneReview, /No automatic changes are available/);
+  assert.doesNotMatch(context.yellowstoneReview, /INVALID PROPOSAL/);
+  assert.equal(context.yellowstoneApproval, false);
+  assert.equal(context.yellowstoneStateAfter, context.yellowstoneStateBefore, 'Yellowstone analysis and review remain read-only');
+  assert.equal(context.yellowstoneStorageAfter, context.yellowstoneStorageBefore, 'Yellowstone review leaves persisted state byte-for-byte unchanged');
+  assert.equal(context.yellowstoneBookingsAfter, context.yellowstoneBookingsBefore);
+  assert.equal(context.yellowstoneMustAfter, context.yellowstoneMustBefore);
+  assert.equal(context.yellowstoneCards, 57);
 
   // Exact Las Vegas extra-day regression: start from a saved current itinerary,
   // reconstruct only flexible days, and absorb the extra day before RV return.
