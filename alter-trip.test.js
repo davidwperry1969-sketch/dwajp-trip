@@ -1139,6 +1139,31 @@ async function runRouteIntelligenceAsyncTests() {
   assert.match(context.transferReset15.plan, /Lamar Valley/);
   assert.match(context.transferReset17.dest, /MISSOULA → SEATTLE \/ EVERETT/);
 
+  // Live RED regression: route intelligence verifies a Spokane split, but no
+  // eligible calendar date exists without consuming requested or timed time.
+  run("state={days:{'2026-09-24':{dest:'NEW ORLEANS → Winnie, Texas',dest_query:'Winnie, Texas'}}}; localStorage.setItem(STORE,JSON.stringify(state)); globalThis.redTransferStateBefore=JSON.stringify(state); globalThis.redTransferStorageBefore=localStorage.getItem(STORE); globalThis.redTransferBookingsBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.redTransferMustBefore=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); globalThis.redTransfer=analyseAlter2Request(globalThis.transferCommand); globalThis.redTransferCalls=[]; globalThis.redTransferRoutes={async resolveAsync({origin,destination}){let key=origin.key+'>'+destination.key;globalThis.redTransferCalls.push(key);let values={'yellowstone>missoula':[430.1,260],'missoula>seattle everett':[806.3,498],'missoula>spokane':[319.8,190],'spokane>seattle everett':[455.2,270]}[key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  const redTransferVerification = await run('verifyAlter2Routes(globalThis.redTransfer,{routeIntelligence:globalThis.redTransferRoutes})');
+  assert.equal(redTransferVerification.status, 'verified');
+  assert.deepEqual(Array.from(redTransferVerification.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['YELLOWSTONE','MISSOULA',430.1,260,'GREEN'],['MISSOULA','SEATTLE / EVERETT',806.3,498,'RED']]);
+  assert.ok(context.redTransfer.repairs.length >= 2, 'RED day-transfer generation searches for repairs before KEEP ORIGINAL');
+  const spokaneRepair = context.redTransfer.repairs.find(option=>/spokane/i.test(option.id));
+  assert.ok(spokaneRepair, 'validated Spokane forward-corridor split is investigated');
+  assert.equal(spokaneRepair.viable, false, 'the road-safe split is not offered as selectable when it cannot fit the dates');
+  assert.deepEqual(Array.from(spokaneRepair.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['YELLOWSTONE','MISSOULA',430.1,260,'GREEN'],['MISSOULA','Spokane, Washington',319.8,190,'GREEN'],['Spokane, Washington','SEATTLE / EVERETT',455.2,270,'GREEN']]);
+  assert.match(spokaneRepair.failureReason, /needs one additional travel date[\s\S]*consume the requested transferred Seattle day[\s\S]*no eligible flexible date/i);
+  assert.match(spokaneRepair.protectedImpact, /Kraken[\s\S]*RV-return preparation[\s\S]*20 October/i);
+  assert.equal(context.redTransfer.repairs.at(-1).id, 'keep-original');
+  assert.equal(run('alter2ApprovalReady(globalThis.redTransfer)'), false, 'the unrepaired RED transfer remains blocked');
+  run("alter2Pending=globalThis.redTransfer; globalThis.redTransferReview=renderAlter2RepairOptions(globalThis.redTransfer); globalThis.redTransferApply=approveAlter2Changes(); globalThis.redTransferStateAfter=JSON.stringify(state); globalThis.redTransferStorageAfter=localStorage.getItem(STORE); globalThis.redTransferBookingsAfter=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.redTransferMustAfter=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO'))");
+  assert.match(context.redTransferReview, /SPLIT RED LEG VIA SPOKANE, WASHINGTON[\s\S]*319\.8 km[\s\S]*3 hr 10 min[\s\S]*GREEN[\s\S]*455\.2 km[\s\S]*4 hr 30 min[\s\S]*GREEN/i);
+  assert.match(context.redTransferReview, /NOT SAFE TO APPLY[\s\S]*KEEP ORIGINAL — LEAVE IT/i);
+  assert.equal(context.redTransferApply, false);
+  assert.equal(context.redTransferStateAfter, context.redTransferStateBefore);
+  assert.equal(context.redTransferStorageAfter, context.redTransferStorageBefore);
+  assert.equal(context.redTransferBookingsAfter, context.redTransferBookingsBefore);
+  assert.equal(context.redTransferMustAfter, context.redTransferMustBefore);
+  assert.equal(run("lookupLocationCoordinates('Spokane').status"), 'validated');
+
   // Exact Yellowstone regression: the only repeated local Seattle days carry a
   // timed target and return-preparation duty, so neither is silently sacrificed.
   run("state={days:{'2026-09-24':{dest:'NEW ORLEANS → Winnie, Texas',dest_query:'Winnie, Texas'}}}; localStorage.setItem(STORE,JSON.stringify(state)); globalThis.yellowstoneStateBefore=JSON.stringify(state); globalThis.yellowstoneStorageBefore=localStorage.getItem(STORE); globalThis.yellowstoneBookingsBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.yellowstoneMustBefore=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); globalThis.yellowstoneAnalysis=analyseAlter2Request('I want an extra day in Yellowstone. Make it work without changing any confirmed bookings or MUST DO items.')");
