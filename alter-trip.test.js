@@ -81,6 +81,21 @@ assert.match(persistedStartupContext.persistedReset19.plan, /Bass Pro Shops Nigh
 assert.match(persistedStartupContext.persistedReset19.detour, /Bristol town \/ speedway/i, 'Reset Edits restores the original Bristol detour');
 assert.match(persistedStartupContext.persistedReset19.contact, /Bristol Motor Speedway[\s\S]*151 Speedway Blvd[\s\S]*423-989-6900/i, 'Reset Edits restores the original Bristol contact');
 
+const vegasColdBytes = JSON.stringify({ days: { '2026-09-24': { dest: 'NEW ORLEANS → Winnie, Texas', dest_query: 'Winnie, Texas' } } });
+const vegasColdElements = {};
+const vegasColdStorage = { data: { 'dwajp-trip-v5': vegasColdBytes }, getItem(key) { return this.data[key] || null }, setItem(key, value) { this.data[key] = value }, removeItem(key) { delete this.data[key] } };
+const vegasColdContext = {
+  alert() {}, confirm: () => true, localStorage: vegasColdStorage, window: { addEventListener() {}, scrollTo() {}, print() {} },
+  document: { body: { classList: { add() {}, remove() {} } }, getElementById(id) { return vegasColdElements[id] || (vegasColdElements[id] = makeElement()) }, querySelectorAll() { return [] }, querySelector() { return null }, documentElement: { style: { setProperty() {} } } },
+  requestAnimationFrame: fn => fn(), encodeURIComponent, JSON, String, Date, Set, Math, parseInt
+};
+vm.createContext(vegasColdContext);
+assert.doesNotThrow(() => vm.runInContext(script, vegasColdContext), 'app cold-starts with the current persisted override before Las Vegas analysis');
+vm.runInContext("globalThis.vegasColdAnalysis=analyseAlter2Request('I want to stay an extra day in Las Vegas. Make it work without changing any confirmed bookings or MUST DO items.')", vegasColdContext);
+assert.equal(vegasColdContext.vegasColdAnalysis.proposalValidation.valid, true, 'cold-start proposal uses the consistent compressed repair');
+assert.equal(vegasColdStorage.data['dwajp-trip-v5'], vegasColdBytes, 'cold-start Las Vegas analysis leaves saved overrides byte-for-byte unchanged');
+assert.equal((vegasColdContext.document.getElementById('content').innerHTML.match(/<article class="card"/g) || []).length, 57, 'cold-start persisted itinerary still renders all 57 cards');
+
 // A failure in one optional day-card helper is isolated to that date.
 const renderGuardState = JSON.stringify({ days: { '2026-09-24': { dest: 'NEW ORLEANS → Winnie, Texas', dest_query: 'Winnie, Texas' }, '2026-09-25': { dest: 'Winnie, Texas → Mason, Texas', dest_query: 'Mason, Texas' } } });
 run(`state=${renderGuardState}; localStorage.setItem(STORE,JSON.stringify(state)); renderHome(); globalThis.renderGuardNormal=document.getElementById('content').innerHTML; globalThis.renderGuardOriginal=overnightSuggestions`);
@@ -1082,6 +1097,41 @@ async function runRouteIntelligenceAsyncTests() {
   assert.doesNotMatch(encodedAssessment, /80 minutes/);
   const wedAnalysis = await run("analyseTripChangeWithRouteIntelligence(\"We don't need to get to Milwaukee until later on Friday.\")");
   assert.equal(wedAnalysis.routeAssessments.some(item => item.day.date === '2026-09-09'), false, 'Wed 9 Sep is a local Ortonville/Detroit excursion, not an intercity route for verification');
+
+  // Exact Las Vegas extra-day regression: start from a saved current itinerary,
+  // reconstruct only flexible days, and absorb the extra day before RV return.
+  run("state={days:{'2026-09-24':{dest:'NEW ORLEANS → Winnie, Texas',dest_query:'Winnie, Texas'}}}; localStorage.setItem(STORE,JSON.stringify(state)); globalThis.vegasStateBefore=JSON.stringify(state); globalThis.vegasStorageBefore=localStorage.getItem(STORE); globalThis.vegasBookingsBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.vegasMustBefore=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); globalThis.vegasRequest='I want to stay an extra day in Las Vegas. Make it work without changing any confirmed bookings or MUST DO items.'; globalThis.vegasAnalysis=analyseAlter2Request(globalThis.vegasRequest)");
+  assert.equal(context.vegasAnalysis.scannedDays, 57);
+  assert.equal(context.vegasAnalysis.target, '2026-10-03');
+  assert.equal(context.vegasAnalysis.proposalValidation.valid, true, context.vegasAnalysis.proposalValidation.issues.join('; '));
+  assert.deepEqual(Array.from(context.vegasAnalysis.solverDetails.rejectedFullShiftValidation.issues), ['2026-10-18: plan/contact metadata does not match the proposed route','2026-10-19: plan/contact metadata does not match the proposed route'], 'the regression records the exact inconsistencies that made the all-days shift invalid');
+  assert.equal(context.vegasAnalysis.changes[0].date, '2026-10-06');
+  assert.equal(context.vegasAnalysis.changes.at(-1).date, '2026-10-12');
+  assert.deepEqual(Array.from(context.vegasAnalysis.changes.map(change => [change.date,change.changes.dest])), [['2026-10-06','las vegas'],['2026-10-07','LAS VEGAS → YOSEMITE'],['2026-10-08','YOSEMITE'],['2026-10-09','YOSEMITE'],['2026-10-10','YOSEMITE → ELKO'],['2026-10-11','ELKO'],['2026-10-12','ELKO']], 'review uses the concrete day-by-day compressed sequence');
+  assert.deepEqual(Array.from(context.vegasAnalysis.routeLegs.map(leg => `${leg.origin} -> ${leg.destination}`)), ['LAS VEGAS -> YOSEMITE','YOSEMITE -> ELKO']);
+  assert.match(context.vegasAnalysis.summary, /sacrificing Mon 12 Oct: Final rest day/i, 'the solver names the flexible day used to gain the extra Vegas day');
+  assert.match(context.vegasAnalysis.solutions.join('\n'), /Final rest day • Prepare for Yellowstone/i, 'review discloses the sacrificed lower-priority time');
+  assert.equal(run('JSON.stringify(state)'), context.vegasStateBefore, 'Las Vegas analysis remains read-only');
+  assert.equal(localStorage.getItem('dwajp-trip-v5'), context.vegasStorageBefore, 'Las Vegas analysis leaves persisted overrides byte-for-byte unchanged');
+  run("globalThis.vegasRouteCalls=[]; globalThis.vegasRoutes={async resolveAsync({origin,destination}){globalThis.vegasRouteCalls.push(origin.key+'>'+destination.key);let values={'las vegas>yosemite':[650,450],'yosemite>elko':[530,420]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  const vegasVerification = await run('verifyAlter2Routes(globalThis.vegasAnalysis,{routeIntelligence:globalThis.vegasRoutes})');
+  assert.equal(vegasVerification.status, 'verified');
+  assert.deepEqual(Array.from(vegasVerification.legs.map(leg => [leg.changeDate,leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['2026-10-07','LAS VEGAS','YOSEMITE',650,450,'YELLOW'],['2026-10-10','YOSEMITE','ELKO',530,420,'YELLOW']]);
+  assert.equal(run('alter2ApprovalReady(globalThis.vegasAnalysis)'), true, 'the internally consistent verified non-RED repair is approval-ready');
+  run("alter2Pending=globalThis.vegasAnalysis; showAlter2FinalProposal(); globalThis.vegasReview=renderAlter2ChangeRows(globalThis.vegasAnalysis); globalThis.vegasStateAfterReview=JSON.stringify(state); globalThis.vegasStorageAfterReview=localStorage.getItem(STORE)");
+  assert.match(context.vegasReview, /Tue 6 Oct — las vegas[\s\S]*Wed 7 Oct — LAS VEGAS → YOSEMITE[\s\S]*650 km[\s\S]*7 hr 30 min[\s\S]*YELLOW/i);
+  assert.match(context.vegasReview, /Sat 10 Oct — YOSEMITE → ELKO[\s\S]*530 km[\s\S]*7 hr[\s\S]*YELLOW/i);
+  assert.doesNotMatch(context.vegasReview, /INVALID PROPOSAL/);
+  assert.equal(context.vegasStateAfterReview, context.vegasStateBefore, 'candidate verification and review do not mutate state');
+  assert.equal(context.vegasStorageAfterReview, context.vegasStorageBefore, 'candidate verification and review do not write localStorage');
+  run("globalThis.vegasApplied=approveAlter2Changes(); globalThis.vegasCards=(document.getElementById('content').innerHTML.match(/<article class=\"card/g)||[]).length; globalThis.vegasBookingsAfter=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.vegasMustAfter=JSON.stringify(DAYS.filter(day=>String(day.status||'').toUpperCase()==='MUST DO')); globalThis.vegas20=mergedDays().find(day=>day.date==='2026-10-20'); resetEdits(); globalThis.vegasReset6=mergedDays().find(day=>day.date==='2026-10-06'); globalThis.vegasReset12=mergedDays().find(day=>day.date==='2026-10-12')");
+  assert.equal(context.vegasApplied, true);
+  assert.equal(context.vegasCards, 57);
+  assert.equal(context.vegasBookingsAfter, context.vegasBookingsBefore, 'confirmed bookings remain byte-for-byte unchanged');
+  assert.equal(context.vegasMustAfter, context.vegasMustBefore, 'master MUST DO items remain byte-for-byte unchanged');
+  assert.match(context.vegas20.dest, /RV RETURN → SAN FRANCISCO/, 'the protected 20 October commitment is not rewritten');
+  assert.match(context.vegasReset6.dest, /LAS VEGAS → YOSEMITE/, 'Reset Edits restores the original departure day');
+  assert.match(context.vegasReset12.plan, /Final rest day • Prepare for Yellowstone/, 'Reset Edits restores the sacrificed master day exactly');
 
   run('RouteIntelligence.setProvider(null)');
   const missingRoute = await run("RouteIntelligence.resolveAsync({origin:'Origin',destination:'Destination',days:[]})");
