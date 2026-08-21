@@ -27,6 +27,22 @@ vm.runInContext(script, context);
 const run = code => vm.runInContext(code, context);
 const modal = context.document.getElementById('alterModal');
 
+// A saved approved destination must be safe during the script's initial render,
+// before the later route-intelligence registry declarations have initialized.
+const startupElements = {};
+const startupStorage = { data: { 'dwajp-trip-v5': JSON.stringify({ days: { '2026-09-24': { dest: 'NEW ORLEANS → Winnie, Texas', dest_query: 'Winnie, Texas' }, '2026-09-25': { dest: 'Winnie, Texas → Mason, Texas', dest_query: 'Mason, Texas' } } }) }, getItem(key) { return this.data[key] || null }, setItem(key, value) { this.data[key] = value }, removeItem(key) { delete this.data[key] } };
+const startupContext = {
+  alert() {}, confirm: () => true, localStorage: startupStorage, window: { addEventListener() {}, scrollTo() {}, print() {} },
+  document: { body: { classList: { add() {}, remove() {} } }, getElementById(id) { return startupElements[id] || (startupElements[id] = makeElement()) }, querySelectorAll() { return [] }, querySelector() { return null }, documentElement: { style: { setProperty() {} } } },
+  requestAnimationFrame: fn => fn(), encodeURIComponent, JSON, String, Date, Set, Math, parseInt
+};
+vm.createContext(startupContext);
+assert.doesNotThrow(() => vm.runInContext(script, startupContext), 'approved Winnie state must not break initial renderHome');
+const startupMarkup = startupContext.document.getElementById('content').innerHTML;
+assert.equal((startupMarkup.match(/<article class="card"/g) || []).length, 57, 'initial Home render retains all 57 itinerary day cards');
+assert.match(startupMarkup, /Winnie, Texas RV park \/ campground search/, 'initial approved Winnie card uses its current destination suggestions');
+assert.equal(startupStorage.data['dwajp-trip-v5'], JSON.stringify({ days: { '2026-09-24': { dest: 'NEW ORLEANS → Winnie, Texas', dest_query: 'Winnie, Texas' }, '2026-09-25': { dest: 'Winnie, Texas → Mason, Texas', dest_query: 'Mason, Texas' } } }), 'startup rendering does not overwrite saved Alter Trip state');
+
 // 1. Alter Trip opens with the four plain-language modes.
 run('showAlter()');
 for (const label of ['FIND SOMETHING', 'CHANGE MY TRIP', 'ADD SOMETHING', 'REMOVE SOMETHING']) assert.match(modal.innerHTML, new RegExp(label));
