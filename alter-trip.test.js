@@ -583,17 +583,23 @@ async function runRouteIntelligenceAsyncTests() {
   run("resetEdits(); globalThis.legacyReset26=mergedDays().find(day=>day.date==='2026-09-26')");
   assert.equal(context.legacyReset26.weather, '17–28°C • ~570 km from Houston');
 
-  // Rebalancing an approved overnight affects both halves of the route while retaining Friday's destination.
-  run("state={days:{}}; for(let change of globalThis.checkoutTravel.changes){state.days[change.date]=alter2CommittedValue({...change.changes,...alter2VerifiedRoutePatch(globalThis.checkoutTravel,change)})} localStorage.setItem(STORE,JSON.stringify(state)); globalThis.halfwayStateBefore=JSON.stringify(state); globalThis.halfwayStorageBefore=localStorage.getItem(STORE); globalThis.halfwayRequest='Change the overnight stop on 24 September from Beaumont to a better halfway stop between New Orleans and Mason.'; globalThis.halfwayAnalysis=analyseAlter2Request(globalThis.halfwayRequest); globalThis.halfwayStateAfterAnalysis=JSON.stringify(state); globalThis.halfwayStorageAfterAnalysis=localStorage.getItem(STORE); globalThis.halfwayCalls=[]; globalThis.halfwayRoutes={async resolveAsync({origin,destination}){globalThis.halfwayCalls.push(origin.key+'>'+destination.key);let values={'new orleans>winnie':[481.4,274],'winnie>mason':[545,360],'new orleans>henderson':[214,150],'henderson>mason':[811.9,500]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  // Rebalancing an approved flexible route scans 24–26 Sep, verifies both changed
+  // legs, rejects RED candidates and retains the Texas Hill Country objective.
+  run("state={days:{}}; for(let change of globalThis.checkoutTravel.changes){state.days[change.date]=alter2CommittedValue({...change.changes,...alter2VerifiedRoutePatch(globalThis.checkoutTravel,change)})} localStorage.setItem(STORE,JSON.stringify(state)); globalThis.halfwayStateBefore=JSON.stringify(state); globalThis.halfwayStorageBefore=localStorage.getItem(STORE); globalThis.halfwayBookingsBefore=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.halfwayLaterBefore=JSON.stringify(mergedDays().filter(day=>day.date>='2026-09-27')); globalThis.halfwayRequest='On 24 September, drive farther west than the current overnight and rebalance 24–26 September so the two driving days are as even as practical before the Texas Hill Country day.'; globalThis.halfwayAnalysis=analyseAlter2Request(globalThis.halfwayRequest); globalThis.halfwayStateAfterAnalysis=JSON.stringify(state); globalThis.halfwayStorageAfterAnalysis=localStorage.getItem(STORE); globalThis.halfwayCalls=[]; globalThis.halfwayRoutes={async resolveAsync({origin,destination}){globalThis.halfwayCalls.push(origin.key+'>'+destination.key);let values={'new orleans>winnie':[481.4,274],'winnie>mason':[545,360],'new orleans>henderson':[214,150],'henderson>mason':[811.9,500]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
   assert.equal(context.halfwayAnalysis.kind, 'route-balance');
-  assert.deepEqual([...context.halfwayAnalysis.affected.map(item=>item.date)], ['2026-09-24','2026-09-25']);
+  assert.equal(context.halfwayAnalysis.scannedDays, 57);
+  assert.deepEqual([...context.halfwayAnalysis.affected.map(item=>item.date)], ['2026-09-24','2026-09-25','2026-09-26']);
   assert.deepEqual([...context.halfwayAnalysis.changes.map(change=>change.date)], ['2026-09-24','2026-09-25']);
+  assert.match(context.halfwayAnalysis.affected[2].reason, /Continuity checked[\s\S]*Texas Hill Country/i);
   assert.match(context.halfwayAnalysis.summary, /overnight is the variable to optimise[\s\S]*Mason, Texas remains/i);
   assert.equal(context.halfwayStateAfterAnalysis, context.halfwayStateBefore);
   assert.equal(context.halfwayStorageAfterAnalysis, context.halfwayStorageBefore);
   const halfwayStatus = await run("verifyAlter2Routes(globalThis.halfwayAnalysis,{routeIntelligence:globalThis.halfwayRoutes})");
   assert.equal(halfwayStatus.status, 'verified');
+  assert.deepEqual([...context.halfwayAnalysis.affected.map(item=>item.date)], ['2026-09-24','2026-09-25','2026-09-26']);
   assert.deepEqual(Array.from(halfwayStatus.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.pressure])), [['NEW ORLEANS','Winnie, Texas',481.4,274,'GREEN'],['Winnie, Texas','Mason, Texas',545,360,'YELLOW']]);
+  assert.equal(context.halfwayAnalysis.routeBalanceAttempts.some(attempt=>attempt.candidate==='Henderson, Louisiana'&&!attempt.safe&&attempt.legs.some(leg=>leg.pressure==='RED')), true, 'a RED candidate is rejected when the verified Winnie alternative is non-RED');
+  assert.equal(context.halfwayAnalysis.routeBalanceAttempts.some(attempt=>attempt.candidate==='Winnie, Texas'&&attempt.safe), true, 'the selected westbound Winnie split is fully verified and non-RED');
   assert.deepEqual(Array.from(context.halfwayAnalysis.changes.map(change=>change.date)), ['2026-09-24','2026-09-25']);
   assert.match(context.halfwayAnalysis.changes[1].changes.dest, /Winnie, Texas → Mason, Texas/);
   assert.equal(context.halfwayAnalysis.changes.some(change=>change.date==='2026-09-26'), false, 'Saturday and later days are not rewritten');
@@ -602,14 +608,20 @@ async function runRouteIntelligenceAsyncTests() {
   const halfwayReview = run('renderAlter2ChangeRows(globalThis.halfwayAnalysis)');
   assert.match(halfwayReview, /Thu 24 Sep — NEW ORLEANS → Winnie, Texas[\s\S]*481\.4 km[\s\S]*4 hr 34 min[\s\S]*GREEN/);
   assert.match(halfwayReview, /Fri 25 Sep — Winnie, Texas → Mason, Texas[\s\S]*545 km[\s\S]*6 hr[\s\S]*YELLOW/);
+  assert.match(halfwayReview, /PADDED RV TRAVEL:[\s\S]*approximately 6 hr 30 min[\s\S]*PADDED RV TRAVEL:[\s\S]*approximately 8 hr 15 min/);
+  assert.doesNotMatch(halfwayReview, /Sat 26 Sep/, 'Review changes only the two driving days; Saturday is continuity-checked only');
   assert.match(halfwayReview, /OVERNIGHT OPTIONS — SUGGESTED \/ NOT BOOKED/);
   assert.equal(run('JSON.stringify(state)'), context.halfwayStateBefore, 'route optimisation and review do not write itinerary state');
   assert.equal(localStorage.getItem('dwajp-trip-v5'), context.halfwayStorageBefore, 'route optimisation and review do not write localStorage');
   assert.equal(run("state.days['2026-09-22']"), undefined);
   assert.equal(run("state.days['2026-09-23']"), undefined);
-  run("alter2Pending=globalThis.halfwayAnalysis; globalThis.halfwayApproved=approveAlter2Changes(); globalThis.approvedWinnieDay=mergedDays().find(day=>day.date==='2026-09-24'); globalThis.approvedMasonDay=mergedDays().find(day=>day.date==='2026-09-25'); globalThis.approvedWinnieOvernights=overnightSuggestions(globalThis.approvedWinnieDay); globalThis.approvedMasonOvernights=overnightSuggestions(globalThis.approvedMasonDay); globalThis.approvedWinnieOptions=overnightOptionsForDay(globalThis.approvedWinnieDay)");
+  run("alter2Pending=globalThis.halfwayAnalysis; globalThis.halfwayApproved=approveAlter2Changes(); globalThis.approvedWinnieDay=mergedDays().find(day=>day.date==='2026-09-24'); globalThis.approvedMasonDay=mergedDays().find(day=>day.date==='2026-09-25'); globalThis.approvedHillCountryDay=mergedDays().find(day=>day.date==='2026-09-26'); globalThis.halfwayBookingsAfter=JSON.stringify(CONFIRMED_BOOKING_WINDOWS); globalThis.halfwayLaterAfter=JSON.stringify(mergedDays().filter(day=>day.date>='2026-09-27')); globalThis.approvedWinnieOvernights=overnightSuggestions(globalThis.approvedWinnieDay); globalThis.approvedMasonOvernights=overnightSuggestions(globalThis.approvedMasonDay); globalThis.approvedWinnieOptions=overnightOptionsForDay(globalThis.approvedWinnieDay)");
   assert.equal(context.halfwayApproved, true);
   assert.match(context.approvedWinnieDay.dest, /Winnie, Texas/);
+  assert.match(context.approvedMasonDay.dest, /Winnie, Texas → Mason, Texas/);
+  assert.match(context.approvedHillCountryDay.dest, /TEXAS HILL COUNTRY/);
+  assert.equal(context.halfwayBookingsAfter, context.halfwayBookingsBefore, 'confirmed bookings remain byte-for-byte unchanged');
+  assert.equal(context.halfwayLaterAfter, context.halfwayLaterBefore, '27 Sep and later itinerary days remain byte-for-byte unchanged');
   assert.match(context.approvedWinnieOvernights, /Winnie, Texas RV park \/ campground search[\s\S]*Public campground search near Winnie, Texas[\s\S]*Authorised overnight RV parking near Winnie, Texas/);
   assert.match(context.approvedWinnieOvernights, /query=Winnie%2C%20Texas|near%20Winnie%2C%20Texas/);
   assert.doesNotMatch(context.approvedWinnieOvernights, /Dos Rios|Hill Country State Natural Area|Walmart near the selected Hill Country route/i, 'approved Winnie day cannot retain Mason/Hill Country cards');
