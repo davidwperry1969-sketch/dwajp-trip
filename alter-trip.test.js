@@ -43,6 +43,23 @@ assert.equal((startupMarkup.match(/<article class="card"/g) || []).length, 57, '
 assert.match(startupMarkup, /Winnie, Texas RV park \/ campground search/, 'initial approved Winnie card uses its current destination suggestions');
 assert.equal(startupStorage.data['dwajp-trip-v5'], JSON.stringify({ days: { '2026-09-24': { dest: 'NEW ORLEANS → Winnie, Texas', dest_query: 'Winnie, Texas' }, '2026-09-25': { dest: 'Winnie, Texas → Mason, Texas', dest_query: 'Mason, Texas' } } }), 'startup rendering does not overwrite saved Alter Trip state');
 
+// A failure in one optional day-card helper is isolated to that date.
+const renderGuardState = JSON.stringify({ days: { '2026-09-24': { dest: 'NEW ORLEANS → Winnie, Texas', dest_query: 'Winnie, Texas' }, '2026-09-25': { dest: 'Winnie, Texas → Mason, Texas', dest_query: 'Mason, Texas' } } });
+run(`state=${renderGuardState}; localStorage.setItem(STORE,JSON.stringify(state)); renderHome(); globalThis.renderGuardNormal=document.getElementById('content').innerHTML; globalThis.renderGuardOriginal=overnightSuggestions`);
+assert.equal((context.renderGuardNormal.match(/<article class="card/g) || []).length, 57, 'normal guarded rendering still contains all 57 days');
+assert.doesNotMatch(context.renderGuardNormal, /render-error-card/, 'normal rendering is unchanged when helpers succeed');
+run(`overnightSuggestions=function(day){if(day.date==='2026-09-24')throw new Error('Forced overnight suggestion failure');return globalThis.renderGuardOriginal(day)}; globalThis.renderGuardStateBefore=JSON.stringify(state); globalThis.renderGuardStorageBefore=localStorage.getItem(STORE); renderHome(); globalThis.renderGuardFailure=document.getElementById('content').innerHTML; globalThis.renderGuardStateAfter=JSON.stringify(state); globalThis.renderGuardStorageAfter=localStorage.getItem(STORE); overnightSuggestions=globalThis.renderGuardOriginal`);
+assert.equal((context.renderGuardFailure.match(/<article class="card/g) || []).length, 57, 'a helper exception cannot remove any of the 57 day containers');
+assert.equal((context.renderGuardFailure.match(/render-error-card/g) || []).length, 1, 'only the broken day receives a fallback card');
+const brokenDayMarkup = context.renderGuardFailure.match(/<article class="card render-error-card" id="day-2026-09-24">[\s\S]*?<\/article>/)[0];
+for (const expected of ['Thu 24 Sep', 'NEW ORLEANS → Winnie, Texas', 'PLANNED', 'Display error — itinerary data is still safe', 'Forced overnight suggestion failure']) assert.match(brokenDayMarkup, new RegExp(expected));
+assert.match(context.renderGuardFailure, /Fri 25 Sep[\s\S]*Winnie, Texas → Mason, Texas/, 'subsequent approved days continue rendering normally');
+assert.equal(context.renderGuardStateAfter, context.renderGuardStateBefore, 'render failure leaves in-memory state byte-for-byte unchanged');
+assert.equal(context.renderGuardStorageAfter, context.renderGuardStorageBefore, 'render failure leaves localStorage byte-for-byte unchanged');
+run(`renderHome(); globalThis.renderGuardRestored=document.getElementById('content').innerHTML`);
+assert.equal(context.renderGuardRestored, context.renderGuardNormal, 'normal rendering is identical after the failed helper is restored');
+run(`state={}; localStorage.removeItem(STORE); renderHome()`);
+
 // 1. Alter Trip opens with the four plain-language modes.
 run('showAlter()');
 for (const label of ['FIND SOMETHING', 'CHANGE MY TRIP', 'ADD SOMETHING', 'REMOVE SOMETHING']) assert.match(modal.innerHTML, new RegExp(label));
