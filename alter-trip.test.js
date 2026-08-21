@@ -503,6 +503,17 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(context.checkoutReset26.weather, '17–28°C • ~570 km from Houston', 'Reset Edits restores the original downstream master text');
   assert.equal(context.checkoutResetWeekRoute, undefined, 'Reset Edits clears the approved week-route override');
 
+  // Existing phones may hold an approval created before downstream reconciliation existed.
+  run("state={days:{}}; for(let change of globalThis.checkoutTravel.changes){state.days[change.date]=alter2CommittedValue({...change.changes,...alter2VerifiedRoutePatch(globalThis.checkoutTravel,change)})} localStorage.setItem(STORE,JSON.stringify(state)); globalThis.legacyApprovedStateBefore=JSON.stringify(state); globalThis.legacyRendered26=mergedDays().find(day=>day.date==='2026-09-26'); globalThis.legacyRendered26Card=dayCard(globalThis.legacyRendered26); globalThis.legacyApprovedStateAfter=JSON.stringify(state); globalThis.legacyApprovedStorageAfter=localStorage.getItem(STORE)");
+  assert.equal(run("state.days['2026-09-26']"), undefined, 'legacy approved state reproduces the missing persisted day-26 patch');
+  assert.equal(context.legacyRendered26.weather, '17–28°C • LOCAL', 'render-time compatibility fixes an already-approved legacy route');
+  assert.doesNotMatch(context.legacyRendered26Card.match(/<div class="cardhead">[\s\S]*?<\/div><div class="grid">/)[0], /Houston|~570 km/i, 'the actual Saturday card header contains no stale Houston distance');
+  assert.match(context.legacyRendered26Card, /17–28°C • LOCAL[\s\S]*Pressure: EASY/);
+  assert.equal(context.legacyApprovedStateAfter, context.legacyApprovedStateBefore, 'render reconciliation does not mutate itinerary state');
+  assert.equal(context.legacyApprovedStorageAfter, JSON.stringify(JSON.parse(context.legacyApprovedStateBefore)), 'render reconciliation does not write localStorage');
+  run("resetEdits(); globalThis.legacyReset26=mergedDays().find(day=>day.date==='2026-09-26')");
+  assert.equal(context.legacyReset26.weather, '17–28°C • ~570 km from Houston');
+
   // The MAKE A CHANGE runtime boundary reconstructs stale generic state, then renders that plan.
   run("state={}; localStorage.removeItem(STORE); globalThis.checkoutRuntimeBefore=JSON.stringify(state); globalThis.checkoutRuntimeStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRuntimeCommand='Leave New Orleans on 24 September and drive toward Texas'; alter2Pending={...analyseAlter2Request(globalThis.checkoutRuntimeCommand),kind:'direct',summary:'The flexible date matched.',changes:[{date:'2026-09-24',changes:{plan:'User-approved change: '+globalThis.checkoutRuntimeCommand+'\\nUser-approved change: '+globalThis.checkoutRuntimeCommand},reason:'Matched flexible date.'}],routeLegs:[],requiresRouteVerification:false,routeVerification:null}; globalThis.checkoutRuntimeCalls=[]; RouteIntelligence.setProvider({async routeAsync({origin,destination}){globalThis.checkoutRuntimeCalls.push(origin.key+'>'+destination.key);let values={'new orleans>beaumont':[445,285],'beaumont>mason':[570,390]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); showAlter2FinalProposal(); globalThis.checkoutRuntimeInitialHtml=document.getElementById('alterModal').innerHTML");
   await new Promise(resolve => setImmediate(resolve));
