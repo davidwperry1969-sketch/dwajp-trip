@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 
 const html = fs.readFileSync('index.html', 'utf8');
 const browserScriptTags = [...html.matchAll(/<script(?:\s+src="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)].map(match => ({src:match[1] || '', code:match[2] || ''}));
-assert.deepEqual(browserScriptTags.map(tag => tag.src || 'inline'), ['inline','bookings-v2.js?v=20260819-1','alter-trip-booking-override.js?v=ca69bd031eea'], 'browser script load order remains inline app, Bookings, then Alter Trip override');
+assert.deepEqual(browserScriptTags.map(tag => tag.src || 'inline'), ['inline','bookings-v2.js?v=20260819-1','alter-trip-booking-override.js?v=70ac9d4c6fc1'], 'browser script load order remains inline app, Bookings, then Alter Trip override');
 const alterOverrideHash = crypto.createHash('sha256').update(fs.readFileSync('alter-trip-booking-override.js')).digest('hex').slice(0,12);
 assert.equal(new URLSearchParams(browserScriptTags[2].src.split('?')[1]).get('v'), alterOverrideHash, 'Alter Trip override URL is content-versioned so production cannot reuse an older cached wrapper');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -1396,6 +1396,22 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(phoneContext.phoneImpact.kind,'protected-stay-timing');
   assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.timingDates)),{laterArrival:'2026-09-11',earlierDeparture:'2026-09-14'});
   assert.deepEqual(Array.from(phoneContext.phoneImpact.changes.map(change=>change.date)),['2026-09-10','2026-09-11'],'only occupancy-compatible inbound timing remains in the automatic proposal');
+  assert.equal(phoneContext.phoneImpact.proposalValidation.valid,true,'the safe partial proposal is internally consistent before Review');
+  assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.routeLegs.map(leg=>[leg.date,leg.origin,leg.destination]))),[
+    ['2026-09-10','ORTONVILLE','Indiana Dunes'],
+    ['2026-09-10','Indiana Dunes','MILWAUKEE']
+  ],'Thursday represents both component legs and does not treat Indiana Dunes as the overnight endpoint');
+  const phoneThursday=phoneContext.phoneImpact.changes.find(change=>change.date==='2026-09-10').changes;
+  const phoneFriday=phoneContext.phoneImpact.changes.find(change=>change.date==='2026-09-11').changes;
+  assert.equal(phoneThursday.dest,'ORTONVILLE → Indiana Dunes → MILWAUKEE');
+  assert.equal(phoneThursday.dest_query,'MILWAUKEE');
+  assert.match(phoneThursday.plan,/Indiana Dunes as a daytime stop[\s\S]*continue to MILWAUKEE[\s\S]*protected occupied night/i);
+  assert.match(phoneThursday.route_maps,/origin=ORTONVILLE[\s\S]*destination=MILWAUKEE[\s\S]*waypoints=Indiana%20Dunes/,'Thursday navigation metadata contains the complete component route');
+  assert.equal(phoneFriday.dest,'MILWAUKEE');
+  assert.equal(phoneFriday.dest_query,'MILWAUKEE');
+  assert.match(phoneFriday.weather,/LOCAL/);
+  assert.match(phoneFriday.plan,/local timing in MILWAUKEE[\s\S]*returning to Anne & Tim[\s\S]*protected occupied night/i);
+  assert.equal(phoneFriday.contact,undefined,'Friday keeps the existing canonical/private-stay contact rather than replacing it');
   assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.affected.map(item=>[item.date,item.dest]))),[
     ['2026-09-10','ORTONVILLE → Indiana Dunes → MILWAUKEE'],
     ['2026-09-11','MILWAUKEE'],
@@ -1414,6 +1430,7 @@ async function runRouteIntelligenceAsyncTests() {
   assert.deepEqual(Array.from(phoneContext.phoneReviewPending.changes.map(change=>change.date)),['2026-09-10','2026-09-11'],'the review retains only the occupancy-compatible scanned proposal');
   assert.match(phoneContext.phoneReviewHtml,/Review Before Approval/);
   assert.match(phoneContext.phoneReviewHtml,/ORTONVILLE → Indiana Dunes → MILWAUKEE/i);
+  assert.doesNotMatch(phoneContext.phoneReviewHtml,/INVALID PROPOSAL|destination and dest_query disagree|plan\/contact metadata does not match the proposed route/,'Review accepts the coherent safe partial model without weakening validation');
   assert.doesNotMatch(phoneContext.phoneReviewHtml,/Mon 14 Sep[\s\S]*MILWAUKEE → BLOOMINGTON/i,'Review never presents Monday Bloomington as compatible with the occupied night');
   assert.doesNotMatch(phoneContext.phoneReviewHtml,/No automatic changes are available/);
   assert.match(phoneContext.phoneReviewHtml,/id="alter2ApproveButton"[^>]*disabled/,'APPROVE remains disabled during Worker route verification');
@@ -1428,6 +1445,10 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(phoneContext.phonePrivateAfter,phoneContext.phonePrivateBefore,'Friends/Family records remain byte-for-byte unchanged');
   const phoneVerification = await phoneRun('verifyAlter2Routes(globalThis.phoneReviewPending,{routeIntelligence:RouteIntelligence})');
   assert.equal(phoneVerification.status,'verified');
+  assert.deepEqual(JSON.parse(JSON.stringify(phoneVerification.legs.map(leg=>[leg.origin,leg.destination,leg.verification]))),[
+    ['ORTONVILLE','Indiana Dunes','verified'],
+    ['Indiana Dunes','MILWAUKEE','verified']
+  ],'Worker verification covers both Thursday components from the proposal model');
   assert.equal(phoneRun('alter2ApprovalReady(globalThis.phoneReviewPending)'),false,'route verification cannot make an unresolved occupied-night conflict approval-ready');
   assert.equal(phoneRun('JSON.stringify(DWAJP_BOOKINGS.allBookings())'),phoneContext.phoneBookingsBefore,'Cruise America and every commercial booking remain unchanged');
   phoneRun("globalThis.hardPrivateImpact=analyseAlter2Request('Change Anne and Tim address on 11 September'); renderAlter2Analysis(globalThis.hardPrivateImpact); globalThis.hardPrivateImpactHtml=document.getElementById('alterModal').innerHTML");
