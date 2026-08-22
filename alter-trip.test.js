@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 
 const html = fs.readFileSync('index.html', 'utf8');
 const browserScriptTags = [...html.matchAll(/<script(?:\s+src="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)].map(match => ({src:match[1] || '', code:match[2] || ''}));
-assert.deepEqual(browserScriptTags.map(tag => tag.src || 'inline'), ['inline','bookings-v2.js?v=20260819-1','alter-trip-booking-override.js?v=d2906dfa43c1'], 'browser script load order remains inline app, Bookings, then Alter Trip override');
+assert.deepEqual(browserScriptTags.map(tag => tag.src || 'inline'), ['inline','bookings-v2.js?v=20260819-1','alter-trip-booking-override.js?v=620270604b2d'], 'browser script load order remains inline app, Bookings, then Alter Trip override');
 const alterOverrideHash = crypto.createHash('sha256').update(fs.readFileSync('alter-trip-booking-override.js')).digest('hex').slice(0,12);
 assert.equal(new URLSearchParams(browserScriptTags[2].src.split('?')[1]).get('v'), alterOverrideHash, 'Alter Trip override URL is content-versioned so production cannot reuse an older cached wrapper');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -1417,12 +1417,22 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(phoneContext.phoneImpact.kind,'protected-stay-timing');
   assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.timingDates)),{laterArrival:'2026-09-11',earlierDeparture:'2026-09-14'});
   assert.deepEqual(Array.from(phoneContext.phoneImpact.changes.map(change=>change.date)),['2026-09-10','2026-09-11','2026-09-14','2026-09-15','2026-09-16'],'canonical production dates produce the protected-stay timing workaround immediately after SCAN');
+  assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.affected.map(item=>[item.date,item.dest]))),[
+    ['2026-09-10','ORTONVILLE → Indiana Dunes'],
+    ['2026-09-11','Indiana Dunes → MILWAUKEE'],
+    ['2026-09-14','MILWAUKEE → BLOOMINGTON, IL'],
+    ['2026-09-15','BLOOMINGTON → NASHVILLE'],
+    ['2026-09-16','NASHVILLE']
+  ],'Impact Affected Days uses the exact effective date/route mapping from the proposal model');
   assert.ok(phoneContext.phoneImpact.routeLegs.length>0);
   assert.doesNotMatch(phoneContext.phoneImpactHtml,/RELEASE THESE BOOKINGS|Cruise America/,'Cruise America is not offered for release');
+  assert.match(phoneContext.phoneImpactHtml,/PRIVATE STAY PROTECTED — travel-only changes allowed\. Accommodation and private-stay data remain unchanged\./,'occupied dates with safe travel-only changes explain the entity-level protection rule');
+  assert.doesNotMatch(phoneContext.phoneImpactHtml,/PROTECTED COMMITMENT — no automatic write allowed\./,'safe travel-only dates do not show the hard protected-write warning');
   phoneClick('MAKE A CHANGE');
   phoneRun("globalThis.phoneReviewPending=alter2Pending; globalThis.phoneSamePending=alter2Pending===globalThis.phoneImpactRef; globalThis.phoneReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.phoneStateAfterReview=JSON.stringify(state); globalThis.phoneStorageAfterReview=JSON.stringify(localStorage.data); globalThis.phonePrivateAfter=JSON.stringify(effectivePrivateStays())");
   assert.equal(phoneContext.phoneSamePending,true,'MAKE A CHANGE reads the same alter2Pending object stored by the impact renderer');
   assert.deepEqual(Array.from(phoneContext.phoneReviewPending.changes.map(change=>change.date)),['2026-09-10','2026-09-11','2026-09-14','2026-09-15','2026-09-16'],'the review retains the exact scanned proposal');
+  assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.affected.map(item=>[item.date,item.dest]))),JSON.parse(JSON.stringify(phoneContext.phoneReviewPending.changes.map(change=>[change.date,change.changes.dest]))),'Impact and Review derive their effective dates and routes from the same proposal model');
   assert.match(phoneContext.phoneReviewHtml,/Review Before Approval/);
   assert.match(phoneContext.phoneReviewHtml,/ORTONVILLE → Indiana Dunes[\s\S]*Indiana Dunes → MILWAUKEE/i);
   assert.doesNotMatch(phoneContext.phoneReviewHtml,/No automatic changes are available/);
@@ -1438,6 +1448,13 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(phoneVerification.status,'verified');
   assert.equal(phoneRun('alter2ApprovalReady(globalThis.phoneReviewPending)'),true,'approval becomes ready only after every normal route and protection check succeeds');
   assert.equal(phoneRun('JSON.stringify(DWAJP_BOOKINGS.allBookings())'),phoneContext.phoneBookingsBefore,'Cruise America and every commercial booking remain unchanged');
+  phoneRun("globalThis.hardPrivateImpact=analyseAlter2Request('Change Anne and Tim address on 11 September'); renderAlter2Analysis(globalThis.hardPrivateImpact); globalThis.hardPrivateImpactHtml=document.getElementById('alterModal').innerHTML");
+  assert.equal(phoneContext.hardPrivateImpact.status,'RED','a request to alter canonical private-stay data remains RED');
+  assert.equal(phoneContext.hardPrivateImpact.changes.length,0,'a canonical private-stay mutation produces no automatic write');
+  assert.match(phoneContext.hardPrivateImpactHtml,/PROTECTED COMMITMENT — no automatic write allowed\./,'a canonical private-stay mutation retains the hard protection warning');
+  assert.doesNotMatch(phoneContext.hardPrivateImpactHtml,/PRIVATE STAY PROTECTED — travel-only changes allowed/,'the travel-only message is not used for a private-stay entity mutation');
+  assert.equal(phoneRun('JSON.stringify(state)'),phoneContext.phoneStateBefore,'hard protected analysis remains read-only');
+  assert.equal(phoneRun('JSON.stringify(localStorage.data)'),phoneContext.phoneStorageBefore,'hard protected review does not write localStorage');
 
   run('RouteIntelligence.setProvider(null)');
   const missingRoute = await run("RouteIntelligence.resolveAsync({origin:'Origin',destination:'Destination',days:[]})");
