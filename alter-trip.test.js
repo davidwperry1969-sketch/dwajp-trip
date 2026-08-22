@@ -11,7 +11,7 @@ assert.match(html, /@media \(max-width:720px\)\{#alterModal/, 'phone-specific Al
 assert.match(html, /#alterModal \.btn\{min-height:44px/, 'Alter Trip buttons meet a practical touch target');
 const elements = {};
 const makeElement = () => ({
-  innerHTML: '', value: '',
+  innerHTML: '', value: '', dataset: {}, removed: false, remove() { this.removed = true; this.dataset.removed = 'true' },
   classList: { open: false, add(name) { if (name === 'open') this.open = true }, remove(name) { if (name === 'open') this.open = false } },
   scrollCalls: [], scrollIntoView(options) { this.scrollCalls.push(options) }
 });
@@ -68,27 +68,46 @@ assert.equal(context.privateStayResetCards,57);
 // Phone-first Friends/Family editor: user data is persisted separately from
 // itinerary experiments and every existing private-stay consumer sees the
 // same effective record.
+run("privateStayUserData={overrides:{'anne-tim-oconomowoc':{phone:'2624245492'}},records:{}}; localStorage.setItem(PRIVATE_STAY_STORE,JSON.stringify(privateStayUserData)); privateStayUserData=loadPrivateStayUserData()");
+assert.deepEqual(JSON.parse(run("JSON.stringify(privateStayById('anne-tim-oconomowoc').phones)")),[{label:'Phone',number:'2624245492'}],'legacy single-phone storage is read as one labelled phone without data loss');
 run("openPrivateStayForm('anne-tim-oconomowoc')");
 assert.match(modal.innerHTML,/EDIT FRIEND \/ FAMILY[\s\S]*value="Anne &amp; Tim"[\s\S]*value="1190 N Griffith Road"/,'Anne & Tim form is pre-filled from the canonical master');
-assert.match(modal.innerHTML,/id="ps-phone" type="tel"/,'phone field requests a phone keyboard');
+assert.match(modal.innerHTML,/id="ps-phone-number-0" type="tel"/,'phone row requests a phone keyboard');
+assert.match(modal.innerHTML,/id="ps-phone-number-0" type="tel" value="2624245492"/,'the currently saved legacy phone is pre-filled automatically');
+assert.match(modal.innerHTML,/\+ ADD ANOTHER PHONE/,'editor offers unlimited additional phone rows');
 const privateBytesBeforeCancel=localStorage.getItem('dwajp-trip-private-stays-v1');
 run('closePrivateStayForm()');
 assert.equal(localStorage.getItem('dwajp-trip-private-stays-v1'),privateBytesBeforeCancel,'opening and cancelling the editor writes nothing');
 function setPrivateField(id,value,checked){const el=context.document.getElementById(id);el.value=value;if(checked!==undefined)el.checked=checked}
-function fillPrivateStayForm({id='',name,phone='',street='',city='',state='',postcode='',country='USA',type='OVERNIGHT',arrival='',departure='',priority='IMPORTANT',status='CONFIRMED',protectedValue=true,notes=''}){
-  for(const [key,value] of Object.entries({'ps-id':id,'ps-name':name,'ps-phone':phone,'ps-street':street,'ps-city':city,'ps-state':state,'ps-postcode':postcode,'ps-country':country,'ps-type':type,'ps-arrival':arrival,'ps-departure':departure,'ps-priority':priority,'ps-status':status,'ps-notes':notes}))setPrivateField(key,value);
+function fillPrivateStayForm({id='',name,phone='',phones=null,street='',city='',state='',postcode='',country='USA',type='OVERNIGHT',arrival='',departure='',priority='IMPORTANT',status='CONFIRMED',protectedValue=true,notes=''}){
+  for(const [key,value] of Object.entries({'ps-id':id,'ps-name':name,'ps-street':street,'ps-city':city,'ps-state':state,'ps-postcode':postcode,'ps-country':country,'ps-type':type,'ps-arrival':arrival,'ps-departure':departure,'ps-priority':priority,'ps-status':status,'ps-notes':notes}))setPrivateField(key,value);
+  const entries=phones||(phone?[{label:'Phone',number:phone}]:[]);setPrivateField('ps-phone-count',String(entries.length));entries.forEach((entry,index)=>{setPrivateField(`ps-phone-label-${index}`,entry.label);setPrivateField(`ps-phone-number-${index}`,entry.number)});
   setPrivateField('ps-protected','',protectedValue);
 }
 fillPrivateStayForm({id:'anne-tim-oconomowoc',name:'Anne & Tim',phone:'+1 262-555-0100',street:'1190 N Griffith Road',city:'Oconomowoc',state:'WI',postcode:'53066',arrival:'2026-09-10',departure:'2026-09-15'});
 assert.equal(run('savePrivateStay()'),true);
 assert.equal(run("effectivePrivateStays().filter(stay=>stay.displayName==='Anne & Tim').length"),1,'editing the master does not duplicate Anne & Tim');
-assert.equal(run("privateStayById('anne-tim-oconomowoc').phone"),'+1 262-555-0100');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').phones[0].number"),'+1 262-555-0100');
 assert.match(run("privateStayContactCard(privateStayById('anne-tim-oconomowoc'))"),/href="tel:\+12625550100"/,'SAVE creates a Call action');
 run('privateStayUserData=loadPrivateStayUserData()');
-assert.equal(run("privateStayById('anne-tim-oconomowoc').phone"),'+1 262-555-0100','saved phone survives a cold reload of the user-data layer');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').phones[0].number"),'+1 262-555-0100','saved phone survives a cold reload of the user-data layer');
 const savedFriendBytes=localStorage.getItem('dwajp-trip-private-stays-v1');
 run('resetEdits()');
 assert.equal(localStorage.getItem('dwajp-trip-private-stays-v1'),savedFriendBytes,'Reset Edits preserves real Friends/Family user data');
+fillPrivateStayForm({id:'anne-tim-oconomowoc',name:'Anne & Tim',phones:[{label:'Anne - Mobile',number:'2624245492'},{label:'Tim - Mobile',number:'+1 262-555-0199'},{label:'Home',number:'+1 262-555-0188'}],street:'1190 N Griffith Road',city:'Oconomowoc',state:'WI',postcode:'53066',arrival:'2026-09-10',departure:'2026-09-15'});
+assert.equal(run('savePrivateStay()'),true);
+assert.deepEqual(JSON.parse(run("JSON.stringify(privateStayById('anne-tim-oconomowoc').phones)")),[{label:'Anne - Mobile',number:'2624245492'},{label:'Tim - Mobile',number:'+1 262-555-0199'},{label:'Home',number:'+1 262-555-0188'}],'multiple labelled phones save in order');
+const multiPhoneContact=run("privateStayContactCard(privateStayById('anne-tim-oconomowoc'))");
+assert.match(multiPhoneContact,/Call Anne - Mobile[\s\S]*tel:\+12625550199[\s\S]*Call Tim - Mobile[\s\S]*tel:\+12625550188[\s\S]*Call Home/,'each labelled phone gets its own Call action');
+assert.match(run("privateStayPanel(mergedDays().find(day=>day.date==='2026-09-11'))"),/Call Anne - Mobile[\s\S]*Call Tim - Mobile[\s\S]*Call Home/,'itinerary private-stay panel exposes compact labelled Call actions');
+assert.match(run("printAccommodation(mergedDays().find(day=>day.date==='2026-09-11'))"),/Anne - Mobile: 2624245492 • Tim - Mobile: \+1 262-555-0199 • Home: \+1 262-555-0188/,'print renders labelled phones compactly');
+run('privateStayUserData=loadPrivateStayUserData()');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').phones.length"),3,'multiple phones survive reload');
+const multiPhoneBytes=localStorage.getItem('dwajp-trip-private-stays-v1');run('resetEdits()');assert.equal(localStorage.getItem('dwajp-trip-private-stays-v1'),multiPhoneBytes,'multiple phones survive Reset Edits');
+fillPrivateStayForm({id:'anne-tim-oconomowoc',name:'Anne & Tim',phones:[{label:'Anne - Mobile',number:'2624245492'},{label:'Tim - Mobile',number:'+1 262-555-0199'}],street:'1190 N Griffith Road',city:'Oconomowoc',state:'WI',postcode:'53066',arrival:'2026-09-10',departure:'2026-09-15'});
+run('removePrivateStayPhone(0)');assert.equal(run('savePrivateStay()'),true);
+assert.deepEqual(JSON.parse(run("JSON.stringify(privateStayById('anne-tim-oconomowoc').phones)")),[{label:'Tim - Mobile',number:'+1 262-555-0199'}],'removing one phone preserves the Friends/Family record and remaining phone');
+assert.equal(run("effectivePrivateStays().filter(stay=>stay.displayName==='Anne & Tim').length"),1,'phone removal never removes or duplicates the contact');
 fillPrivateStayForm({name:'Lauren & Brett',street:'User supplied street',city:'Ortonville',state:'MI',postcode:'00000',arrival:'2026-09-08',departure:'2026-09-10',notes:'Entered entirely in app'});
 assert.equal(run('savePrivateStay()'),true);
 assert.equal(run("privateStaysForDate('2026-09-08').some(stay=>stay.displayName==='Lauren & Brett')"),true);
@@ -111,7 +130,7 @@ assert.equal(run(`deletePrivateStay('${userId}')`),true,'explicit Delete removes
 assert.equal(run("privateStayById('anne-tim-oconomowoc').displayName"),'Anne & Tim','deleting user data cannot remove the master record');
 run("delete privateStayUserData.overrides['anne-tim-oconomowoc']; for(const id of Object.keys(privateStayUserData.records))delete privateStayUserData.records[id]; localStorage.removeItem(PRIVATE_STAY_STORE); privateStayUserData=loadPrivateStayUserData(); renderHome(); globalThis.friendEditorCardCount=(document.getElementById('content').innerHTML.match(/<article class=\"card\"/g)||[]).length");
 assert.equal(context.friendEditorCardCount,57,'all 57 cards render after editor operations and master recovery');
-assert.equal(run("privateStayById('anne-tim-oconomowoc').phone"),'','master Anne & Tim base remains recoverable');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').phones.length"),0,'master Anne & Tim base remains recoverable');
 
 // A saved approved destination must be safe during the script's initial render,
 // before the later route-intelligence registry declarations have initialized.
