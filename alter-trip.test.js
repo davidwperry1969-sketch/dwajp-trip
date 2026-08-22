@@ -794,7 +794,7 @@ async function runRouteIntelligenceAsyncTests() {
 
   // Exact phone command: direct section scope must win over generic Yellowstone
   // token matching, and the fixed Seattle date constrains rather than cancels search.
-  run(`state={}; localStorage.removeItem(STORE); globalThis.yellowstoneSectionBefore=JSON.stringify(state); globalThis.yellowstoneSectionStorageBefore=JSON.stringify(localStorage.data); RouteIntelligence.setProvider({async routeAsync({origin,destination}){let pair=origin.key+'>'+destination.key,values=/yellowstone[\s\S]*>spokane/.test(pair)?[575,410]:/spokane[\s\S]*>seattle everett/.test(pair)?[395,285]:null;return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); globalThis.yellowstoneSection=analyseAlter2Request('We want to make the Yellowstone to Seattle section easier without changing when we need to reach Seattle.'); globalThis.yellowstoneSectionInitialAffected=yellowstoneSection.affected.map(item=>[item.date,item.reason]); renderAlter2Analysis(yellowstoneSection); globalThis.yellowstoneSectionCheckingHtml=document.getElementById('alterModal').innerHTML`);
+  run(`state={}; localStorage.removeItem(STORE); globalThis.yellowstoneSectionBefore=JSON.stringify(state); globalThis.yellowstoneSectionStorageBefore=JSON.stringify(localStorage.data); RouteIntelligence.setProvider({async routeAsync({origin,destination}){let pair=origin.key+'>'+destination.key,values=/yellowstone[\s\S]*>missoula/.test(pair)?[430.1,256]:/missoula[\s\S]*>seattle everett/.test(pair)?[806.3,496]:/yellowstone[\s\S]*>spokane/.test(pair)?[575,410]:/spokane[\s\S]*>seattle everett/.test(pair)?[395,285]:null;return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); globalThis.yellowstoneSection=analyseAlter2Request('We want to make the Yellowstone to Seattle section easier without changing when we need to reach Seattle.'); globalThis.yellowstoneSectionInitialAffected=yellowstoneSection.affected.map(item=>[item.date,item.reason]); renderAlter2Analysis(yellowstoneSection); globalThis.yellowstoneSectionCheckingHtml=document.getElementById('alterModal').innerHTML`);
   assert.equal(context.yellowstoneSection.kind,'driving-balance-direct');
   assert.deepEqual(Array.from(context.yellowstoneSectionInitialAffected.map(item=>item[0])),['2026-10-16','2026-10-17']);
   assert.ok(Array.from(context.yellowstoneSectionInitialAffected).every(item=>/DIRECT REQUEST SCOPE/.test(item[1])));
@@ -812,7 +812,7 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(run('alter2ApprovalReady(globalThis.yellowstoneSectionResolved)'),true,'the direct improvement becomes approval-ready only after both legs verify');
   run("globalThis.yellowstoneCandidateDiagnostics=alter2DrivingBalanceRuntimeDiagnostics(globalThis.yellowstoneSectionResolved); globalThis.yellowstoneRuntimeDiagnostics=alter2RuntimeDiagnostics(globalThis.yellowstoneSectionResolved,'review')");
   assert.equal(context.yellowstoneCandidateDiagnostics['CANDIDATES GENERATED'],2,'the direct corridor exposes every generated candidate');
-  assert.equal(context.yellowstoneCandidateDiagnostics['CANDIDATES WORKER VERIFIED'],1,'only candidates with two reliable Worker legs count as verified');
+  assert.equal(context.yellowstoneCandidateDiagnostics['CANDIDATES WORKER VERIFIED'],2,'both corridor candidates have two reliable Worker legs; later gates decide suitability');
   assert.equal(context.yellowstoneCandidateDiagnostics['CANDIDATES REJECTED'],1);
   assert.match(context.yellowstoneCandidateDiagnostics['BEST ACCEPTABLE CANDIDATE'],/Spokane/i);
   const spokaneDiagnostic=Array.from(context.yellowstoneCandidateDiagnostics.CANDIDATES).find(candidate=>/Spokane/i.test(candidate.CANDIDATE));
@@ -824,6 +824,31 @@ async function runRouteIntelligenceAsyncTests() {
   assert.doesNotMatch(context.advisoryMarkup,/CANDIDATES GENERATED|REJECTION REASON|WORKER RESULT/i,'normal customer-facing Truth Mode remains concise');
   assert.equal(run('JSON.stringify(state)'),context.yellowstoneSectionBefore);
   assert.equal(run('JSON.stringify(localStorage.data)'),context.yellowstoneSectionStorageBefore,'direct analysis and Review remain read-only');
+
+  // Real production event path and Worker response contract: form → SCAN →
+  // asynchronous direct-candidate resolution → MAKE A CHANGE → Review.
+  run(`state={}; localStorage.removeItem(STORE); globalThis.directEventStateBefore=JSON.stringify(state); globalThis.directEventStorageBefore=JSON.stringify(localStorage.data); globalThis.directEventFetchCalls=[]; configureRouteIntelligence({enabled:true,fetchImpl:async (url,options)=>{let body=JSON.parse(options.body),pair=(body.origin.label+'>'+body.destination.label).toLowerCase(),values=pair.includes('yellowstone')&&pair.includes('>missoula')?[430.1,256]:pair.includes('missoula')&&pair.includes('>everett')?[806.3,496]:pair.includes('yellowstone')&&pair.includes('>spokane')?[745,446]:pair.includes('spokane')&&pair.includes('>everett')?[490.9,303]:null;globalThis.directEventFetchCalls.push({pair,values});if(!values)return {ok:false,status:503,async json(){return {verification:'route_confirmation_required'}}};return {ok:true,status:200,async json(){return {verification:'verified',provider:'mapbox-directions',origin:body.origin,destination:body.destination,roadDistanceKm:values[0],estimatedDrivingMinutes:values[1],geometry:{type:'LineString',coordinates:[body.origin.coordinates,body.destination.coordinates]},waypoints:[],overnightAreas:[]}}}}}); renderAlter2Form(); document.getElementById('alter2Command').value='We want to make the Yellowstone to Seattle section easier without changing when we need to reach Seattle.'; submitAlter2Command(); globalThis.directEventCheckingPending=alter2Pending; globalThis.directEventCheckingHtml=document.getElementById('alterModal').innerHTML`);
+  assert.equal(context.directEventCheckingPending.kind,'driving-balance-direct');
+  assert.deepEqual(Array.from(context.directEventCheckingPending.directDrivingSection.cluster.dates),['2026-10-16','2026-10-17']);
+  assert.match(context.directEventCheckingHtml,/ROUTE CHECKING/);
+  await new Promise(resolve=>setImmediate(()=>setImmediate(resolve)));
+  run("globalThis.directEventResolvedPending=alter2Pending; globalThis.directEventImpactHtml=document.getElementById('alterModal').innerHTML; showAlter2FinalProposal(); globalThis.directEventReviewPending=alter2Pending; globalThis.directEventReviewHtml=document.getElementById('alterModal').innerHTML");
+  assert.equal(run('globalThis.directEventReviewPending===globalThis.directEventResolvedPending'),true,'MAKE A CHANGE passes the same pending analysis object into Review');
+  assert.equal(context.directEventResolvedPending.directBalanceTrace.stage,'ACTIVE PROPOSAL READY',JSON.stringify({calls:context.directEventFetchCalls,trace:context.directEventResolvedPending.directBalanceTrace,diagnostics:context.directEventResolvedPending.directDrivingSection.cluster.verifiedOutcome&&context.directEventResolvedPending.directDrivingSection.cluster.verifiedOutcome.attempts}));
+  assert.equal(context.directEventResolvedPending.directBalanceTrace.bestAcceptableCandidate,'Spokane, Washington');
+  assert.equal(context.directEventResolvedPending.directBalanceTrace.changes,2);
+  assert.equal(context.directEventResolvedPending.directBalanceTrace.routeLegs,2);
+  assert.deepEqual(Array.from(context.directEventResolvedPending.changes.map(change=>change.date)),['2026-10-16','2026-10-17']);
+  assert.deepEqual(Array.from(context.directEventResolvedPending.routeVerification.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.verification,leg.pressure])),[['YELLOWSTONE','Spokane, Washington',745,446,'verified','YELLOW'],['Spokane, Washington','SEATTLE / EVERETT',490.9,303,'verified','GREEN']]);
+  assert.ok(Array.from(context.directEventFetchCalls).some(call=>/yellowstone[\s\S]*>spokane/.test(call.pair))&&Array.from(context.directEventFetchCalls).some(call=>/spokane[\s\S]*>everett/.test(call.pair)),'the actual browser provider sends both winning legs through the Worker contract');
+  assert.doesNotMatch(context.directEventReviewHtml,/No automatic changes are available/);
+  assert.match(context.directEventReviewHtml,/Fri 16 Oct — YELLOWSTONE → Spokane, Washington[\s\S]*745 km[\s\S]*7 hr 26 min[\s\S]*Sat 17 Oct — Spokane, Washington → SEATTLE \/ EVERETT[\s\S]*490\.9 km[\s\S]*5 hr 3 min/i);
+  assert.match(context.directEventReviewHtml,/Spokane, Washington — SUGGESTED \/ NOT BOOKED/i);
+  assert.match(context.directEventReviewHtml,/BEFORE[\s\S]*430\.1 km • 4 hr 16 min[\s\S]*806\.3 km • 8 hr 16 min/i,'Review compares the candidate with the Worker-verified current route, not stale master estimates');
+  assert.doesNotMatch(context.directEventReviewHtml,/ELKO → YELLOWSTONE|AMARILLO → GALLUP/,'unrelated whole-trip advisory clusters never enter direct Review');
+  assert.equal(run('JSON.stringify(state)'),context.directEventStateBefore);
+  assert.equal(run('JSON.stringify(localStorage.data)'),context.directEventStorageBefore,'the actual SCAN and Review event path remains read-only');
+
   run("globalThis.yellowstoneNoFit=analyseAlter2Request('We want to make the Yellowstone to Seattle section easier without changing when we need to reach Seattle.')");
   await run("alter2ResolveDirectDrivingBalance(globalThis.yellowstoneNoFit,{routeIntelligence:{async resolveAsync(){return {reliable:false}}}})");
   assert.equal(context.yellowstoneNoFit.changes.length,0);
