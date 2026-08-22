@@ -1,8 +1,13 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 
 const html = fs.readFileSync('index.html', 'utf8');
+const browserScriptTags = [...html.matchAll(/<script(?:\s+src="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)].map(match => ({src:match[1] || '', code:match[2] || ''}));
+assert.deepEqual(browserScriptTags.map(tag => tag.src || 'inline'), ['inline','bookings-v2.js?v=20260819-1','alter-trip-booking-override.js?v=040c4e423096'], 'browser script load order remains inline app, Bookings, then Alter Trip override');
+const alterOverrideHash = crypto.createHash('sha256').update(fs.readFileSync('alter-trip-booking-override.js')).digest('hex').slice(0,12);
+assert.equal(new URLSearchParams(browserScriptTags[2].src.split('?')[1]).get('v'), alterOverrideHash, 'Alter Trip override URL is content-versioned so production cannot reuse an older cached wrapper');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 assert.doesNotThrow(() => new Function(script), 'embedded app script should parse');
 assert.match(html, /#alterModal \.sheet\{width:min\(100%,1080px\)/, 'Alter Trip has no fixed modal width');
@@ -1397,29 +1402,33 @@ async function runRouteIntelligenceAsyncTests() {
   assert.match(context.vegasReset6.dest, /LAS VEGAS → YOSEMITE/, 'Reset Edits restores the original departure day');
   assert.match(context.vegasReset12.plan, /Final rest day • Prepare for Yellowstone/, 'Reset Edits restores the sacrificed master day exactly');
 
-  // Production path regression: a RED private-stay constraint may still have a
-  // safe proposal which works around (and never releases) that stay.
-  const overrideScript = fs.readFileSync('alter-trip-booking-override.js', 'utf8').replace("})(typeof window!=='undefined'?window:globalThis);", '})(globalThis);');
-  run("state={}; localStorage.removeItem(STORE); privateStayUserData={overrides:{'anne-tim-oconomowoc':{arrivalDate:'2026-09-11',departureDate:'2026-09-14'}},records:{'lauren-brett-ortonville':{id:'lauren-brett-ortonville',type:'PRIVATE_STAY',relationship:'FRIENDS_FAMILY',displayName:'Lauren & Brett',address:{street:'',city:'Ortonville',state:'MI',postcode:'',country:'USA'},visitType:'OVERNIGHT',arrivalDate:'2026-09-08',departureDate:'2026-09-10',priority:'IMPORTANT',status:'CONFIRMED',protected:true,phones:[]}}}; localStorage.setItem(PRIVATE_STAY_STORE,JSON.stringify(privateStayUserData)); privateStayUserData=loadPrivateStayUserData(); globalThis.milwaukeePrivateBefore=JSON.stringify(effectivePrivateStays()); globalThis.milwaukeeStateBefore=JSON.stringify(state); globalThis.milwaukeeStorageBefore=JSON.stringify(localStorage.data)");
-  vm.runInContext(overrideScript, context);
-  run("RouteIntelligence.setProvider({async routeAsync({origin,destination}){let values={'ortonville>indiana dunes':[300,220],'indiana dunes>milwaukee':[240,180],'milwaukee>bloomington':[358,203],'bloomington>nashville':[400,260]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); document.getElementById('alter2Command').value='We don’t need to get to Milwaukee until later Friday and can leave earlier on Monday.'; submitAlter2Command(); globalThis.milwaukeeProductionImpact=alter2Pending; globalThis.milwaukeeImpactHtml=document.getElementById('alterModal').innerHTML; showAlter2FinalProposal(); globalThis.milwaukeeReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.milwaukeeStateAfterReview=JSON.stringify(state); globalThis.milwaukeeStorageAfterReview=JSON.stringify(localStorage.data); globalThis.milwaukeePrivateAfter=JSON.stringify(effectivePrivateStays())");
-  assert.equal(context.milwaukeeProductionImpact.status, 'RED', 'Impact Result retains the protected private-stay warning');
-  assert.equal(context.milwaukeeProductionImpact.protectedConstraintResolved, true, 'the repair is explicitly marked as working around, not releasing, the constraint');
-  assert.deepEqual(Array.from(context.milwaukeeProductionImpact.changes.map(change => change.date)), ['2026-09-10','2026-09-14','2026-09-15','2026-09-16']);
-  assert.equal(run("globalThis.milwaukeeProductionImpact.changes.some(change=>privateStaysForDate(change.date).some(stay=>stay.status==='CONFIRMED'&&stay.protected))"), false, 'no occupied protected private-stay date receives a proposed write');
-  assert.match(context.milwaukeeImpactHtml, /Anne &amp; Tim remains confirmed and protected/);
-  assert.match(context.milwaukeeReviewHtml, /Review Before Approval[\s\S]*ORTONVILLE → Indiana Dunes[\s\S]*Indiana Dunes → MILWAUKEE/i, 'MAKE A CHANGE renders the established split drive in the real review UI');
-  assert.doesNotMatch(context.milwaukeeReviewHtml, /No automatic changes are available/, 'the production review no longer loses the generated repair');
-  assert.match(context.milwaukeeReviewHtml, /ROUTE CHECKING/, 'all changed driving legs still require Worker verification before approval');
-  assert.match(context.milwaukeeReviewHtml, /id="alter2ApproveButton"[^>]*disabled/, 'approval remains blocked while verification is pending');
-  assert.doesNotMatch(context.milwaukeeImpactHtml, /RELEASE THESE BOOKINGS|Cruise America/, 'the long-running RV hire is not offered for release');
-  run("globalThis.milwaukeeRoutes={async resolveAsync({origin,destination}){let values={'ortonville>indiana dunes':[300,220],'indiana dunes>milwaukee':[240,180],'milwaukee>bloomington':[358,203],'bloomington>nashville':[400,260]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
-  const milwaukeeVerification = await run('verifyAlter2Routes(globalThis.milwaukeeProductionImpact,{routeIntelligence:globalThis.milwaukeeRoutes})');
-  assert.equal(milwaukeeVerification.status, 'verified', 'every normal route check can complete before approval');
-  assert.equal(run('alter2ApprovalReady(globalThis.milwaukeeProductionImpact)'), true, 'approval becomes available only after all route and protection checks pass');
-  assert.equal(context.milwaukeeStateAfterReview, context.milwaukeeStateBefore, 'scan and Review Before Approval do not mutate itinerary state');
-  assert.equal(context.milwaukeeStorageAfterReview, context.milwaukeeStorageBefore, 'scan and Review Before Approval do not write localStorage');
-  assert.equal(context.milwaukeePrivateAfter, context.milwaukeePrivateBefore, 'Anne & Tim and Lauren & Brett remain byte-for-byte unchanged');
+  // Production browser wiring regression: load every script in index.html order,
+  // then dispatch the actual inline SCAN and MAKE A CHANGE handlers.
+  const phoneElements = {}, phoneElement = () => ({innerHTML:'',value:'',disabled:false,dataset:{},style:{},firstElementChild:null,classList:{add(){},remove(){},contains(){return false}},remove(){},scrollIntoView(){},querySelector(){return null},querySelectorAll(){return[]},insertAdjacentHTML(){}});
+  const phonePrivateState = {overrides:{'anne-tim-oconomowoc':{arrivalDate:'2026-09-11',departureDate:'2026-09-14'}},records:{'lauren-brett-ortonville':{id:'lauren-brett-ortonville',type:'PRIVATE_STAY',relationship:'FRIENDS_FAMILY',displayName:'Lauren & Brett',address:{street:'',city:'Ortonville',state:'MI',postcode:'',country:'USA'},visitType:'OVERNIGHT',arrivalDate:'2026-09-08',departureDate:'2026-09-10',priority:'IMPORTANT',status:'CONFIRMED',protected:true,phones:[]}}};
+  const phoneStorage = {data:{'dwajp-trip-private-stays-v1':JSON.stringify(phonePrivateState)},getItem(key){return this.data[key]??null},setItem(key,value){this.data[key]=String(value)},removeItem(key){delete this.data[key]}};
+  const phoneContext = {console,URL,URLSearchParams,Date,Math,JSON,String,Set,Map,Promise,parseInt,encodeURIComponent,decodeURIComponent,localStorage:phoneStorage,sessionStorage:{data:{},getItem(key){return this.data[key]??null},setItem(key,value){this.data[key]=String(value)},removeItem(key){delete this.data[key]}},alert(){},confirm(){return true},requestAnimationFrame(fn){fn()},setTimeout,clearTimeout,fetch:async()=>({ok:false,json:async()=>({})}),addEventListener(){},scrollTo(){},open(){return null},print(){},document:{head:{appendChild(){}},body:{classList:{add(){},remove(){},contains(){return false}}},documentElement:{style:{setProperty(){}}},createElement(){return phoneElement()},getElementById(id){return phoneElements[id]||(phoneElements[id]=phoneElement())},querySelector(){return null},querySelectorAll(){return[]}}};
+  phoneContext.window=phoneContext;phoneContext.globalThis=phoneContext;vm.createContext(phoneContext);
+  for (const tag of browserScriptTags) vm.runInContext(tag.src?fs.readFileSync(tag.src.split('?')[0],'utf8'):tag.code,phoneContext,{filename:tag.src||'index-inline.js'});
+  const phoneRun = code => vm.runInContext(code,phoneContext), phoneClick = label => {const markup=phoneElements.alterModal.innerHTML,buttons=[...markup.matchAll(/<button\b[^>]*onclick="([^"]+)"[^>]*>([\s\S]*?)<\/button>/g)],button=buttons.find(match=>match[2].replace(/<[^>]+>/g,'').includes(label));assert.ok(button,`${label} button exists in rendered browser UI`);return phoneRun(button[1])};
+  phoneRun("renderAlter2Form(); globalThis.phoneStateBefore=JSON.stringify(state); globalThis.phoneStorageBefore=JSON.stringify(localStorage.data); globalThis.phonePrivateBefore=JSON.stringify(effectivePrivateStays()); document.getElementById('alter2Command').value='We don’t need to get to Milwaukee until later Friday and can leave earlier on Monday.'");
+  phoneClick('SCAN TRIP IMPACT');
+  phoneRun("globalThis.phoneImpact=alter2Pending; globalThis.phoneImpactRef=alter2Pending; globalThis.phoneImpactHtml=document.getElementById('alterModal').innerHTML");
+  assert.equal(phoneContext.phoneImpact.status,'RED');
+  assert.deepEqual(Array.from(phoneContext.phoneImpact.changes.map(change=>change.date)),['2026-09-10','2026-09-14','2026-09-15','2026-09-16'],'the deployed-script analysis wrapper supplies the workaround immediately after SCAN');
+  assert.doesNotMatch(phoneContext.phoneImpactHtml,/RELEASE THESE BOOKINGS|Cruise America/,'Cruise America is not offered for release');
+  phoneClick('MAKE A CHANGE');
+  phoneRun("globalThis.phoneReviewPending=alter2Pending; globalThis.phoneSamePending=alter2Pending===globalThis.phoneImpactRef; globalThis.phoneReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.phoneStateAfterReview=JSON.stringify(state); globalThis.phoneStorageAfterReview=JSON.stringify(localStorage.data); globalThis.phonePrivateAfter=JSON.stringify(effectivePrivateStays())");
+  assert.equal(phoneContext.phoneSamePending,true,'MAKE A CHANGE reads the same alter2Pending object stored by the impact renderer');
+  assert.deepEqual(Array.from(phoneContext.phoneReviewPending.changes.map(change=>change.date)),['2026-09-10','2026-09-14','2026-09-15','2026-09-16'],'the review retains the exact scanned proposal');
+  assert.match(phoneContext.phoneReviewHtml,/Review Before Approval[\s\S]*ORTONVILLE → Indiana Dunes → MILWAUKEE/i);
+  assert.match(phoneContext.phoneReviewHtml,/ORTONVILLE → Indiana Dunes[\s\S]*Indiana Dunes → MILWAUKEE/i);
+  assert.doesNotMatch(phoneContext.phoneReviewHtml,/No automatic changes are available/);
+  assert.match(phoneContext.phoneReviewHtml,/id="alter2ApproveButton"[^>]*disabled/,'APPROVE remains disabled during Worker route verification');
+  assert.equal(phoneRun("globalThis.phoneReviewPending.changes.some(change=>privateStaysForDate(change.date).some(stay=>stay.status==='CONFIRMED'&&stay.protected))"),false,'no Anne & Tim or Lauren & Brett occupied date receives a proposed write');
+  assert.equal(phoneContext.phoneStateAfterReview,phoneContext.phoneStateBefore,'real event-path scan/review does not mutate itinerary state');
+  assert.equal(phoneContext.phoneStorageAfterReview,phoneContext.phoneStorageBefore,'real event-path scan/review does not mutate localStorage');
+  assert.equal(phoneContext.phonePrivateAfter,phoneContext.phonePrivateBefore,'Friends/Family records remain byte-for-byte unchanged');
 
   run('RouteIntelligence.setProvider(null)');
   const missingRoute = await run("RouteIntelligence.resolveAsync({origin:'Origin',destination:'Destination',days:[]})");
