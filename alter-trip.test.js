@@ -392,6 +392,15 @@ assert.equal(elements['proposed-solutions'].scrollCalls[0].behavior, 'smooth');
 assert.equal(elements['proposed-solutions'].scrollCalls[0].block, 'start');
 assert.equal(JSON.stringify(localStorage.data), beforeAnalysis);
 
+// Exact production/iPhone wording retains the established Milwaukee split
+// and must not be reduced to a generic text append or false booking release.
+run("state={}; localStorage.removeItem(STORE); renderTripImpact('We don’t need to get to Milwaukee until later Friday and can leave earlier on Monday.'); globalThis.exactPhoneMilwaukeeModal=document.getElementById('alterModal').innerHTML; globalThis.exactPhoneMilwaukeeProposal=pendingTripProposals[0]");
+assert.ok(context.exactPhoneMilwaukeeProposal,'exact phone command constructs the Milwaukee repair');
+assert.match(context.exactPhoneMilwaukeeModal,/OPTION 1 — SPLIT THE DRIVE[\s\S]*ORTONVILLE → Indiana Dunes[\s\S]*Indiana Dunes → MILWAUKEE/);
+assert.match(context.exactPhoneMilwaukeeModal,/PROTECTED BOOKINGS AFFECTED:[\s\S]*NONE/);
+assert.doesNotMatch(context.exactPhoneMilwaukeeModal,/Cruise America|RELEASE THESE BOOKINGS|No automatic option is safe/,'exact phone command does not misclassify the ongoing RV hire');
+assert.equal(localStorage.getItem('dwajp-trip-v5'),null,'exact command analysis remains read-only');
+
 // Stage 3 proposal approval is the only point at which itinerary state is changed.
 run("state={}; localStorage.removeItem(STORE); renderTripImpact(\"We don't need to get to Milwaukee until later on Friday and we can leave earlier on Monday.\"); globalThis.proposalBefore=JSON.stringify(state);");
 assert.equal(context.proposalBefore, '{}');

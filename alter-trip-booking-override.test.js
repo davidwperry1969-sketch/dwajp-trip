@@ -70,6 +70,12 @@ const normalMatch = api.chooseBlockingBookings(
 assert.strictEqual(normalMatch.length, 1);
 assert.strictEqual(normalMatch[0].name, 'Cruise America RV');
 
+const exactMilwaukeeCommand = 'We don’t need to get to Milwaukee until later Friday and can leave earlier on Monday.';
+assert.strictEqual(api.bookingLocksDate(bookings[1], '2026-09-11'), false, 'a long-running RV hire protects its pickup/return handovers, not every travel day');
+assert.strictEqual(api.bookingLocksDate(bookings[1], '2026-09-14'), false, 'Monday inside the hire period is not a Cruise America booking collision');
+assert.strictEqual(api.chooseBlockingBookings([bookings[1]], '2026-09-11', exactMilwaukeeCommand, []).length, 0, 'exact iPhone Milwaukee command does not demand Cruise America release');
+assert.strictEqual(api.findBlockingBookings([bookings[1]], '2026-09-10', '2026-09-16').length, 0, 'a flexible Milwaukee analysis window does not overlap either RV handover');
+
 const state = api.beginOverride(blockers, 'Leave New York on 3 September');
 assert.ok(state.token);
 assert.strictEqual(api.canWriteWithOverride(state.token), true);
