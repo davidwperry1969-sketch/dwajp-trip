@@ -841,6 +841,12 @@ async function runRouteIntelligenceAsyncTests() {
   assert.deepEqual(Array.from(context.directEventResolvedPending.changes.map(change=>change.date)),['2026-10-16','2026-10-17']);
   assert.deepEqual(Array.from(context.directEventResolvedPending.routeVerification.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.verification,leg.pressure])),[['YELLOWSTONE','Spokane, Washington',745,446,'verified','YELLOW'],['Spokane, Washington','SEATTLE / EVERETT',490.9,303,'verified','GREEN']]);
   assert.ok(Array.from(context.directEventFetchCalls).some(call=>/yellowstone[\s\S]*>spokane/.test(call.pair))&&Array.from(context.directEventFetchCalls).some(call=>/spokane[\s\S]*>everett/.test(call.pair)),'the actual browser provider sends both winning legs through the Worker contract');
+  const directImpactSection=context.directEventImpactHtml.match(/<section id="alter2DirectDrivingBalance">[\s\S]*?<\/section>/)?.[0]||'';
+  const advisoryImpactSection=context.directEventImpactHtml.match(/<section id="alter2DrivingBalance">[\s\S]*?<\/section>/)?.[0]||'';
+  assert.match(directImpactSection,/STATUS: HIGH AND IMPROVABLE[\s\S]*CURRENT ROUTE \/ DIRECT REQUEST SCOPE[\s\S]*430\.1 km[\s\S]*806\.3 km[\s\S]*BETTER VERIFIED OPTION[\s\S]*Spokane, Washington[\s\S]*ARRIVAL DATE UNCHANGED:[\s\S]*2026-10-17/i,'the active direct cluster has one authoritative verified Impact result');
+  assert.doesNotMatch(advisoryImpactSection,/2026-10-16|2026-10-17|520 km|760 km|YELLOWSTONE → MISSOULA|MISSOULA → SEATTLE \/ EVERETT/i,'the whole-trip advisory section suppresses the active direct-request cluster and its stale estimates');
+  assert.match(advisoryImpactSection,/2026-09|2026-10-0|2026-10-1[0-5]/,'unrelated whole-trip advisory clusters remain visible');
+  assert.equal(Array.from(context.directEventFetchCalls).filter(call=>/yellowstone[\s\S]*>(?:missoula|spokane)|(?:missoula|spokane)[\s\S]*>everett/.test(call.pair)).length,4,'the active direct cluster is Worker-checked once and is not independently recalculated by the advisory scan');
   assert.doesNotMatch(context.directEventReviewHtml,/No automatic changes are available/);
   assert.match(context.directEventReviewHtml,/Fri 16 Oct — YELLOWSTONE → Spokane, Washington[\s\S]*745 km[\s\S]*7 hr 26 min[\s\S]*Sat 17 Oct — Spokane, Washington → SEATTLE \/ EVERETT[\s\S]*490\.9 km[\s\S]*5 hr 3 min/i);
   assert.match(context.directEventReviewHtml,/Spokane, Washington — SUGGESTED \/ NOT BOOKED/i);
@@ -859,6 +865,10 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(context.yellowstoneNoFitDiagnostics['CANDIDATES REJECTED'],2);
   assert.equal(context.yellowstoneNoFitDiagnostics['BEST ACCEPTABLE CANDIDATE'],'NONE');
   assert.ok(Array.from(context.yellowstoneNoFitDiagnostics.CANDIDATES).every(candidate=>/Worker verification failed/.test(candidate['REJECTION REASON'])),'failed live-style candidate attempts explain the Worker gate rather than fabricating distance');
+  run("globalThis.yellowstoneNoFitImpact=renderAlter2Analysis(globalThis.yellowstoneNoFit)&&document.getElementById('alterModal').innerHTML");
+  assert.match(context.yellowstoneNoFitImpact,/DIRECT REQUEST — DRIVING BALANCE[\s\S]*HIGH BUT JUSTIFIED[\s\S]*KEEP CURRENT ROUTE/i,'a genuine direct-candidate failure remains one truthful keep-current result');
+  const noFitAdvisory=context.yellowstoneNoFitImpact.match(/<section id="alter2DrivingBalance">[\s\S]*?<\/section>/)?.[0]||'';
+  assert.doesNotMatch(noFitAdvisory,/2026-10-16|2026-10-17|YELLOWSTONE → MISSOULA|MISSOULA → SEATTLE \/ EVERETT/i,'failed direct scope is not duplicated by an independent advisory classification');
   assert.equal(run('JSON.stringify(state)'),context.yellowstoneSectionBefore);
   assert.equal(run('JSON.stringify(localStorage.data)'),context.yellowstoneSectionStorageBefore,'candidate diagnostics remain read-only');
 
