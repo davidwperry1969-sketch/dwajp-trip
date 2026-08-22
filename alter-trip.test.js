@@ -389,6 +389,8 @@ assert.equal(run('easyDriveChoice.assessment'),'EASY TO REBALANCE','a clear low-
 run(`globalThis.keepChoice=alter2ChooseDriveRebalance(driveScan.clusters[0],[
  {stop:'Poor Detour',verified:true,forward:true,destinationPreserved:true,overnightSuitable:false,legs:[{distanceKm:500,durationMinutes:360,pressure:'GREEN',verification:'verified'},{distanceKm:500,durationMinutes:360,pressure:'GREEN',verification:'verified'}]},
  {stop:'Wrong Final Destination',verified:true,forward:true,destinationPreserved:false,overnightSuitable:true,legs:[{distanceKm:480,durationMinutes:340,pressure:'GREEN',verification:'verified'},{distanceKm:480,durationMinutes:340,pressure:'GREEN',verification:'verified'}]},
+ {stop:'Excessive Detour',verified:true,forward:true,destinationPreserved:true,overnightSuitable:true,legs:[{distanceKm:540,durationMinutes:380,pressure:'YELLOW',verification:'verified'},{distanceKm:560,durationMinutes:390,pressure:'YELLOW',verification:'verified'}]},
+ {stop:'Protected Overnight',verified:true,forward:true,destinationPreserved:true,overnightSuitable:true,protectedImpact:true,legs:[{distanceKm:520,durationMinutes:360,pressure:'YELLOW',verification:'verified'},{distanceKm:450,durationMinutes:310,pressure:'GREEN',verification:'verified'}]},
  {stop:'Unverified Guess',verified:false,forward:true,destinationPreserved:true,overnightSuitable:true,legs:[{distanceKm:575,durationMinutes:410,pressure:'YELLOW',verification:'failed'},{distanceKm:395,durationMinutes:285,pressure:'GREEN',verification:'verified'}]}
 ]);`);
 assert.equal(run('keepChoice.action'),'KEEP CURRENT ROUTE','no materially better verified practical split leaves the route unchanged');
@@ -413,7 +415,7 @@ run(`globalThis.thousandDeadlineScan=alter2ScanDrivingPressure([
 assert.equal(run('thousandDeadlineScan.clusters[0].totalKm'),1040);
 assert.equal(run('thousandDeadlineChoice.assessment'),'HIGH BUT JUSTIFIED','a 1000+ km pair may remain unchanged when deadline pressure wins');
 assert.equal(run('thousandDeadlineChoice.action'),'KEEP CURRENT ROUTE');
-assert.match(run('renderAlter2DrivingPressureScan(driveScan)'),/TRUTH MODE — DRIVING BALANCE[\s\S]*STATUS: HIGH AND IMPROVABLE[\s\S]*BEFORE[\s\S]*650 km • TIME TO VERIFY[\s\S]*320 km • TIME TO VERIFY[\s\S]*Combined distance — 970 km[\s\S]*thresholds trigger investigation only; they are not failures or violations/i);
+assert.match(run('renderAlter2DrivingPressureScan(driveScan)'),/TRUTH MODE — DRIVING BALANCE[\s\S]*STATUS: HIGH AND IMPROVABLE[\s\S]*CURRENT[\s\S]*650 km • TIME TO VERIFY[\s\S]*320 km • TIME TO VERIFY[\s\S]*Combined distance — 970 km[\s\S]*thresholds trigger investigation only; they are not failures or violations/i);
 run("globalThis.scanReadOnlyState=JSON.stringify(state); globalThis.scanReadOnlyStorage=JSON.stringify(localStorage.data); globalThis.masterPressureScan=alter2ScanDrivingPressure(mergedDays()); globalThis.scanReadOnlyStateAfter=JSON.stringify(state); globalThis.scanReadOnlyStorageAfter=JSON.stringify(localStorage.data)");
 assert.equal(context.scanReadOnlyStateAfter,context.scanReadOnlyState,'whole-trip pressure analysis does not mutate itinerary state');
 assert.equal(context.scanReadOnlyStorageAfter,context.scanReadOnlyStorage,'whole-trip pressure analysis does not write localStorage');
@@ -760,6 +762,36 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(run('formatDrivingDuration(60)'), '1 hr');
   assert.equal(run('formatDrivingDuration(45)'), '45 min');
 
+  // Advisory whole-trip opportunities use the same Worker-backed route path,
+  // but never enter the active proposal's changes array.
+  run(`globalThis.advisoryCluster={dates:['2026-10-16','2026-10-17'],days:[
+    {date:'2026-10-16',dest:'YELLOWSTONE → MISSOULA',weather:'2–12°C • 650 km',plan:'Sightseeing before travel',contact:''},
+    {date:'2026-10-17',dest:'MISSOULA → SEATTLE / EVERETT',weather:'7–14°C • 320 km',plan:'Reach the fixed Seattle destination',contact:''}
+  ],distances:[650,320],totalKm:970,deadlinePressure:false};
+  globalThis.advisoryCalls=[]; globalThis.advisoryRoutes={async resolveAsync({origin,destination}){globalThis.advisoryCalls.push(origin.key+'>'+destination.key);let pair=origin.key+'>'+destination.key,spokane=/spokane/.test(pair),first=/yellowstone[\s\S]*>spokane/.test(pair),second=/spokane[\s\S]*>seattle everett/.test(pair);if(!spokane)return {reliable:false};let values=first?[575,410]:second?[395,285]:null;return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}};
+  globalThis.advisoryStateBefore=JSON.stringify(state); globalThis.advisoryStorageBefore=JSON.stringify(localStorage.data);`);
+  const advisoryOutcome = await run("alter2VerifyDrivingBalanceCluster(globalThis.advisoryCluster,{routeIntelligence:globalThis.advisoryRoutes,days:mergedDays()})");
+  assert.equal(advisoryOutcome.action,'PROPOSE REBALANCE',JSON.stringify({calls:context.advisoryCalls,outcome:advisoryOutcome}));
+  assert.equal(advisoryOutcome.assessment,'HIGH AND IMPROVABLE');
+  assert.match(advisoryOutcome.candidate.stop,/Spokane/i);
+  assert.deepEqual(Array.from(advisoryOutcome.candidate.legs.map(leg=>[leg.distanceKm,leg.durationMinutes,leg.verification,leg.pressure])),[[575,410,'verified','YELLOW'],[395,285,'verified','GREEN']], 'both displayed alternative legs come directly from Worker verification');
+  assert.equal(advisoryOutcome.candidate.legs[1].destination,'SEATTLE / EVERETT','the fixed final destination remains authoritative');
+  assert.ok(context.advisoryCalls.some(call=>/yellowstone[\s\S]*>spokane/.test(call))&&context.advisoryCalls.some(call=>/spokane[\s\S]*>seattle everett/.test(call)),'both component routes use route intelligence');
+  assert.equal(run('JSON.stringify(state)'),context.advisoryStateBefore);
+  assert.equal(run('JSON.stringify(localStorage.data)'),context.advisoryStorageBefore,'advisory candidate search is read-only');
+  context.advisoryOutcome=advisoryOutcome;
+  run("globalThis.advisoryCluster.verifiedOutcome=globalThis.advisoryOutcome; globalThis.advisoryMarkup=renderAlter2DrivingPressureScan({status:'complete',clusters:[globalThis.advisoryCluster]})");
+  assert.match(context.advisoryMarkup,/BETTER VERIFIED OPTION[\s\S]*575 km • 6 hr 50 min • VERIFIED • YELLOW[\s\S]*OVERNIGHT:[\s\S]*SUGGESTED \/ NOT BOOKED[\s\S]*395 km • 4 hr 45 min • VERIFIED • GREEN[\s\S]*FINAL DESTINATION:[\s\S]*UNCHANGED/i);
+  run(`globalThis.easyAdvisoryRoutes={async resolveAsync({origin,destination}){let pair=origin.key+'>'+destination.key,values=/yellowstone[\s\S]*>spokane/.test(pair)?[520,360]:/spokane[\s\S]*>seattle everett/.test(pair)?[450,310]:null;return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}`);
+  const easyAdvisoryOutcome = await run("alter2VerifyDrivingBalanceCluster(globalThis.advisoryCluster,{routeIntelligence:globalThis.easyAdvisoryRoutes,days:mergedDays()})");
+  assert.equal(easyAdvisoryOutcome.assessment,'EASY TO REBALANCE');
+  assert.ok(Array.from(easyAdvisoryOutcome.candidate.legs).every(leg=>leg.verification==='verified'),'easy advisory options also require two verified Worker legs');
+  run("globalThis.grandAdvisoryChangesBefore=JSON.stringify(grandCanyonExtra.changes); globalThis.grandAdvisoryStateBefore=JSON.stringify(state); globalThis.grandAdvisoryStorageBefore=JSON.stringify(localStorage.data)");
+  await run("alter2VerifyDrivingBalanceScan(grandCanyonExtra,{routeIntelligence:{async resolveAsync(){return {reliable:false}}}})");
+  assert.equal(run('JSON.stringify(grandCanyonExtra.changes)'),context.grandAdvisoryChangesBefore,'unrelated advisory opportunities never enter the Grand Canyon proposal');
+  assert.equal(run('JSON.stringify(state)'),context.grandAdvisoryStateBefore);
+  assert.equal(run('JSON.stringify(localStorage.data)'),context.grandAdvisoryStorageBefore,'Grand Canyon advisory verification remains read-only');
+
   // A flexible checkout-day command is reconstructed into verified RV travel days before approval.
   run("globalThis.checkoutTravel=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.checkoutTravelStateBefore=JSON.stringify(state); globalThis.checkoutTravelStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRouteCalls=[]; globalThis.checkoutRouteIntelligence={async resolveAsync({origin,destination}){globalThis.checkoutRouteCalls.push(origin.key+'>'+destination.key);let values={'new orleans>beaumont':[445,285],'beaumont>mason':[570,390]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
   const checkoutRouteStatus = await run("verifyAlter2Routes(globalThis.checkoutTravel,{routeIntelligence:globalThis.checkoutRouteIntelligence})");
@@ -910,7 +942,7 @@ async function runRouteIntelligenceAsyncTests() {
   run("globalThis.checkoutRuntimeReview=renderAlter2ChangeRows(alter2Pending); globalThis.checkoutRuntimeKind=alter2Pending.kind; globalThis.checkoutRuntimeDates=alter2Pending.changes.map(change=>change.date); globalThis.checkoutRuntimeReady=alter2ApprovalReady(alter2Pending)");
   assert.equal(context.checkoutRuntimeKind, 'departure-travel', 'MAKE A CHANGE cannot carry stale generic analysis into Review Before Approval');
   assert.deepEqual([...context.checkoutRuntimeDates], ['2026-09-24','2026-09-25']);
-  assert.deepEqual([...context.checkoutRuntimeCalls.filter(call=>call==='new orleans>beaumont'||call==='beaumont>mason')], ['new orleans>beaumont','beaumont>mason'], 'the constructed checkout legs are the routes sent for verification');
+  assert.deepEqual([...new Set(context.checkoutRuntimeCalls.filter(call=>call==='new orleans>beaumont'||call==='beaumont>mason'))], ['new orleans>beaumont','beaumont>mason'], 'the constructed checkout legs are sent for verification even when the advisory scan independently checks the same corridor');
   assert.match(context.checkoutRuntimeInitialHtml, /Review Before Approval[\s\S]*START:[\s\S]*NEW ORLEANS[\s\S]*DESTINATION \/ STOPPING AREA:[\s\S]*Beaumont, Texas/);
   assert.match(context.checkoutRuntimeReview, /ROUTE:[\s\S]*NEW ORLEANS → Beaumont, Texas[\s\S]*DISTANCE:[\s\S]*445 km[\s\S]*DRIVING TIME:[\s\S]*4 hr 45 min/);
   assert.match(context.checkoutRuntimeReview, /PADDED RV TRAVEL:[\s\S]*fuel, rest and setup allowance[\s\S]*PRESSURE:[\s\S]*GREEN/i);
