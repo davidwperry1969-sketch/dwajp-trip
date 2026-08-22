@@ -792,6 +792,31 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(run('JSON.stringify(state)'),context.grandAdvisoryStateBefore);
   assert.equal(run('JSON.stringify(localStorage.data)'),context.grandAdvisoryStorageBefore,'Grand Canyon advisory verification remains read-only');
 
+  // Exact phone command: direct section scope must win over generic Yellowstone
+  // token matching, and the fixed Seattle date constrains rather than cancels search.
+  run(`state={}; localStorage.removeItem(STORE); globalThis.yellowstoneSectionBefore=JSON.stringify(state); globalThis.yellowstoneSectionStorageBefore=JSON.stringify(localStorage.data); RouteIntelligence.setProvider({async routeAsync({origin,destination}){let pair=origin.key+'>'+destination.key,values=/yellowstone[\s\S]*>spokane/.test(pair)?[575,410]:/spokane[\s\S]*>seattle everett/.test(pair)?[395,285]:null;return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); globalThis.yellowstoneSection=analyseAlter2Request('We want to make the Yellowstone to Seattle section easier without changing when we need to reach Seattle.'); globalThis.yellowstoneSectionInitialAffected=yellowstoneSection.affected.map(item=>[item.date,item.reason]); renderAlter2Analysis(yellowstoneSection); globalThis.yellowstoneSectionCheckingHtml=document.getElementById('alterModal').innerHTML`);
+  assert.equal(context.yellowstoneSection.kind,'driving-balance-direct');
+  assert.deepEqual(Array.from(context.yellowstoneSectionInitialAffected.map(item=>item[0])),['2026-10-16','2026-10-17']);
+  assert.ok(Array.from(context.yellowstoneSectionInitialAffected).every(item=>/DIRECT REQUEST SCOPE/.test(item[1])));
+  assert.doesNotMatch(context.yellowstoneSectionCheckingHtml,/Tue 13 Oct|ELKO → YELLOWSTONE[\s\S]*Matched directly from the command/i);
+  assert.match(context.yellowstoneSectionCheckingHtml,/ROUTE CHECKING/);
+  await new Promise(resolve=>setImmediate(()=>setImmediate(resolve)));
+  run("globalThis.yellowstoneSectionResolved=alter2Pending; globalThis.yellowstoneSectionImpactHtml=document.getElementById('alterModal').innerHTML; showAlter2FinalProposal(); globalThis.yellowstoneSectionReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.yellowstoneSectionChangeRows=renderAlter2ChangeRows(globalThis.yellowstoneSectionResolved)");
+  assert.equal(context.yellowstoneSectionResolved.kind,'route-balance');
+  assert.deepEqual(Array.from(context.yellowstoneSectionResolved.changes.map(change=>change.date)),['2026-10-16','2026-10-17']);
+  assert.deepEqual(Array.from(context.yellowstoneSectionResolved.routeVerification.legs.map(leg=>[leg.origin,leg.destination,leg.distanceKm,leg.durationMinutes,leg.verification])),[['YELLOWSTONE','Spokane, Washington',575,410,'verified'],['Spokane, Washington','SEATTLE / EVERETT',395,285,'verified']]);
+  assert.match(context.yellowstoneSectionResolved.summary,/(?:HIGH AND IMPROVABLE|EASY TO REBALANCE)[\s\S]*Seattle \/ Everett arrival on 2026-10-17/i);
+  assert.match(context.yellowstoneSectionReviewHtml,/TRUTH MODE — DRIVING BALANCE[\s\S]*YELLOWSTONE → Spokane, Washington[\s\S]*575 km[\s\S]*Spokane, Washington → SEATTLE \/ EVERETT[\s\S]*395 km/i);
+  assert.match(context.yellowstoneSectionReviewHtml,/SUGGESTED \/ NOT BOOKED|OVERNIGHT SUGGESTIONS — NOT BOOKED/i);
+  assert.doesNotMatch(context.yellowstoneSectionChangeRows,/2026-09|ELKO → YELLOWSTONE|AMARILLO → GALLUP/i,'unrelated clusters do not enter the direct Yellowstone change rows');
+  assert.equal(run('alter2ApprovalReady(globalThis.yellowstoneSectionResolved)'),true,'the direct improvement becomes approval-ready only after both legs verify');
+  assert.equal(run('JSON.stringify(state)'),context.yellowstoneSectionBefore);
+  assert.equal(run('JSON.stringify(localStorage.data)'),context.yellowstoneSectionStorageBefore,'direct analysis and Review remain read-only');
+  run("globalThis.yellowstoneNoFit=analyseAlter2Request('We want to make the Yellowstone to Seattle section easier without changing when we need to reach Seattle.')");
+  await run("alter2ResolveDirectDrivingBalance(globalThis.yellowstoneNoFit,{routeIntelligence:{async resolveAsync(){return {reliable:false}}}})");
+  assert.equal(context.yellowstoneNoFit.changes.length,0);
+  assert.match(context.yellowstoneNoFit.summary,/HIGH BUT JUSTIFIED — KEEP CURRENT ROUTE[\s\S]*Verified alternatives were checked[\s\S]*Seattle \/ Everett arrival on 2026-10-17/i);
+
   // A flexible checkout-day command is reconstructed into verified RV travel days before approval.
   run("globalThis.checkoutTravel=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.checkoutTravelStateBefore=JSON.stringify(state); globalThis.checkoutTravelStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRouteCalls=[]; globalThis.checkoutRouteIntelligence={async resolveAsync({origin,destination}){globalThis.checkoutRouteCalls.push(origin.key+'>'+destination.key);let values={'new orleans>beaumont':[445,285],'beaumont>mason':[570,390]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
   const checkoutRouteStatus = await run("verifyAlter2Routes(globalThis.checkoutTravel,{routeIntelligence:globalThis.checkoutRouteIntelligence})");
