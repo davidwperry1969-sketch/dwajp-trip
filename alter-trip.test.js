@@ -810,12 +810,32 @@ async function runRouteIntelligenceAsyncTests() {
   assert.match(context.yellowstoneSectionReviewHtml,/SUGGESTED \/ NOT BOOKED|OVERNIGHT SUGGESTIONS — NOT BOOKED/i);
   assert.doesNotMatch(context.yellowstoneSectionChangeRows,/2026-09|ELKO → YELLOWSTONE|AMARILLO → GALLUP/i,'unrelated clusters do not enter the direct Yellowstone change rows');
   assert.equal(run('alter2ApprovalReady(globalThis.yellowstoneSectionResolved)'),true,'the direct improvement becomes approval-ready only after both legs verify');
+  run("globalThis.yellowstoneCandidateDiagnostics=alter2DrivingBalanceRuntimeDiagnostics(globalThis.yellowstoneSectionResolved); globalThis.yellowstoneRuntimeDiagnostics=alter2RuntimeDiagnostics(globalThis.yellowstoneSectionResolved,'review')");
+  assert.equal(context.yellowstoneCandidateDiagnostics['CANDIDATES GENERATED'],2,'the direct corridor exposes every generated candidate');
+  assert.equal(context.yellowstoneCandidateDiagnostics['CANDIDATES WORKER VERIFIED'],1,'only candidates with two reliable Worker legs count as verified');
+  assert.equal(context.yellowstoneCandidateDiagnostics['CANDIDATES REJECTED'],1);
+  assert.match(context.yellowstoneCandidateDiagnostics['BEST ACCEPTABLE CANDIDATE'],/Spokane/i);
+  const spokaneDiagnostic=Array.from(context.yellowstoneCandidateDiagnostics.CANDIDATES).find(candidate=>/Spokane/i.test(candidate.CANDIDATE));
+  assert.equal(spokaneDiagnostic.RESULT,'ACCEPTED');
+  assert.deepEqual([spokaneDiagnostic['LEG 1']['WORKER RESULT'].distance,spokaneDiagnostic['LEG 1']['WORKER RESULT'].duration,spokaneDiagnostic['LEG 1']['WORKER RESULT'].verificationStatus,spokaneDiagnostic['LEG 2']['WORKER RESULT'].distance,spokaneDiagnostic['LEG 2']['WORKER RESULT'].duration,spokaneDiagnostic['LEG 2']['WORKER RESULT'].verificationStatus],['575 km','6 hr 50 min','VERIFIED','395 km','4 hr 45 min','VERIFIED']);
+  const rejectedDiagnostic=Array.from(context.yellowstoneCandidateDiagnostics.CANDIDATES).find(candidate=>candidate.RESULT==='REJECTED');
+  assert.ok(rejectedDiagnostic&&rejectedDiagnostic['REJECTION REASON'],'every rejected direct-balance candidate carries an explicit gate reason');
+  assert.match(context.yellowstoneRuntimeDiagnostics,/CANDIDATES GENERATED[\s\S]*Spokane, Washington[\s\S]*WORKER RESULT[\s\S]*ACCEPTED/i,'collapsible Runtime diagnostics contain candidate Worker provenance');
+  assert.doesNotMatch(context.advisoryMarkup,/CANDIDATES GENERATED|REJECTION REASON|WORKER RESULT/i,'normal customer-facing Truth Mode remains concise');
   assert.equal(run('JSON.stringify(state)'),context.yellowstoneSectionBefore);
   assert.equal(run('JSON.stringify(localStorage.data)'),context.yellowstoneSectionStorageBefore,'direct analysis and Review remain read-only');
   run("globalThis.yellowstoneNoFit=analyseAlter2Request('We want to make the Yellowstone to Seattle section easier without changing when we need to reach Seattle.')");
   await run("alter2ResolveDirectDrivingBalance(globalThis.yellowstoneNoFit,{routeIntelligence:{async resolveAsync(){return {reliable:false}}}})");
   assert.equal(context.yellowstoneNoFit.changes.length,0);
   assert.match(context.yellowstoneNoFit.summary,/HIGH BUT JUSTIFIED — KEEP CURRENT ROUTE[\s\S]*Verified alternatives were checked[\s\S]*Seattle \/ Everett arrival on 2026-10-17/i);
+  run("globalThis.yellowstoneNoFitDiagnostics=alter2DrivingBalanceRuntimeDiagnostics(globalThis.yellowstoneNoFit)");
+  assert.equal(context.yellowstoneNoFitDiagnostics['CANDIDATES GENERATED'],2);
+  assert.equal(context.yellowstoneNoFitDiagnostics['CANDIDATES WORKER VERIFIED'],0);
+  assert.equal(context.yellowstoneNoFitDiagnostics['CANDIDATES REJECTED'],2);
+  assert.equal(context.yellowstoneNoFitDiagnostics['BEST ACCEPTABLE CANDIDATE'],'NONE');
+  assert.ok(Array.from(context.yellowstoneNoFitDiagnostics.CANDIDATES).every(candidate=>/Worker verification failed/.test(candidate['REJECTION REASON'])),'failed live-style candidate attempts explain the Worker gate rather than fabricating distance');
+  assert.equal(run('JSON.stringify(state)'),context.yellowstoneSectionBefore);
+  assert.equal(run('JSON.stringify(localStorage.data)'),context.yellowstoneSectionStorageBefore,'candidate diagnostics remain read-only');
 
   // A flexible checkout-day command is reconstructed into verified RV travel days before approval.
   run("globalThis.checkoutTravel=analyseAlter2Request('Leave New Orleans on 24 September and drive toward Texas'); globalThis.checkoutTravelStateBefore=JSON.stringify(state); globalThis.checkoutTravelStorageBefore=JSON.stringify(localStorage.data); globalThis.checkoutRouteCalls=[]; globalThis.checkoutRouteIntelligence={async resolveAsync({origin,destination}){globalThis.checkoutRouteCalls.push(origin.key+'>'+destination.key);let values={'new orleans>beaumont':[445,285],'beaumont>mason':[570,390]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
