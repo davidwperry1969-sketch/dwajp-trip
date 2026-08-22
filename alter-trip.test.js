@@ -36,12 +36,27 @@ const modal = context.document.getElementById('alterModal');
 // navigation, print and Alter Trip protection without render-time persistence.
 assert.equal(run("privateStayById('anne-tim-oconomowoc').displayName"), 'Anne & Tim');
 assert.equal(run("privateStayFullAddress(privateStayById('anne-tim-oconomowoc'))"), '1190 N Griffith Road, Oconomowoc, WI 53066, USA');
+const canonicalAnneBytes=run("JSON.stringify(PRIVATE_STAYS.find(stay=>stay.id==='anne-tim-oconomowoc'))"), projectedAnneBytes=run("JSON.stringify(privateStayById('anne-tim-oconomowoc'))"), projectionStorageBefore=JSON.stringify(localStorage.data);
+assert.equal(run("privateStayById('anne-tim-oconomowoc').arrivalDate"),'2026-09-10');
+assert.equal(run("privateStayById('anne-tim-oconomowoc').departureDate"),'2026-09-15');
+assert.match(run("privateStayContactCard(privateStayById('anne-tim-oconomowoc'))"),/2026-09-10 → 2026-09-15 departure/,'Friends/Family card displays the same canonical inclusive/exclusive boundary as the editor and day projection');
 for (const date of ['2026-09-10','2026-09-11','2026-09-12','2026-09-13','2026-09-14']) {
   assert.equal(run(`privateStaysForDate('${date}').length`), 1, `${date} is an occupied Anne & Tim night`);
   assert.equal(run(`alter2Affected('${date}','test').locked`), true, `${date} is protected by the canonical private stay`);
+  const projectedCard=run(`dayCard(mergedDays().find(day=>day.date==='${date}'))`);
+  assert.match(projectedCard,/data-private-stay-id="anne-tim-oconomowoc"[\s\S]*Anne &amp; Tim/,`${date} renders the canonical protected private stay`);
+  assert.doesNotMatch(projectedCard,/OVERNIGHT — NOT BOOKED/,`${date} cannot fall through to unconfirmed overnight suggestions`);
 }
 assert.equal(run("privateStaysForDate('2026-09-15').length"), 0, 'departure is checkout-exclusive');
 assert.equal(run("alter2Affected('2026-09-15','test').locked"), false, 'departure day is not locked by the private stay');
+assert.doesNotMatch(run("dayCard(mergedDays().find(day=>day.date==='2026-09-15'))"),/data-private-stay-id="anne-tim-oconomowoc"/,'15 Sep is departure/onward travel, not an occupied Anne & Tim night');
+const laurenBoundary={id:'lauren-boundary-test',type:'PRIVATE_STAY',relationship:'FRIENDS_FAMILY',displayName:'Lauren & Brett',address:{city:'Ortonville',state:'MI',country:'USA'},visitType:'OVERNIGHT',arrivalDate:'2026-09-08',departureDate:'2026-09-10',priority:'IMPORTANT',status:'CONFIRMED',protected:true};
+assert.equal(run(`privateStayOccupiedOn(${JSON.stringify(laurenBoundary)},'2026-09-08')`),true,'Lauren & Brett arrival is occupied');
+assert.equal(run(`privateStayOccupiedOn(${JSON.stringify(laurenBoundary)},'2026-09-09')`),true,'Lauren & Brett final night is occupied');
+assert.equal(run(`privateStayOccupiedOn(${JSON.stringify(laurenBoundary)},'2026-09-10')`),false,'Lauren & Brett departure remains exclusive');
+assert.equal(run("JSON.stringify(PRIVATE_STAYS.find(stay=>stay.id==='anne-tim-oconomowoc'))"),canonicalAnneBytes,'projection does not mutate the canonical Anne & Tim entity');
+assert.equal(run("JSON.stringify(privateStayById('anne-tim-oconomowoc'))"),projectedAnneBytes,'repeated projection is stable and read-only');
+assert.equal(JSON.stringify(localStorage.data),projectionStorageBefore,'private-stay projection and rendering do not write localStorage');
 const privateStayCard = run("dayCard(mergedDays().find(day=>day.date==='2026-09-12'))");
 assert.match(privateStayCard, /PRIVATE STAY — FRIENDS &amp; FAMILY[\s\S]*Anne &amp; Tim[\s\S]*1190 N Griffith Road, Oconomowoc, WI 53066, USA[\s\S]*CONFIRMED \/ PROTECTED/);
 assert.match(privateStayCard, /query=1190%20N%20Griffith%20Road%2C%20Oconomowoc%2C%20WI%2053066%2C%20USA/);
