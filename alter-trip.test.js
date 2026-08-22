@@ -1397,6 +1397,30 @@ async function runRouteIntelligenceAsyncTests() {
   assert.match(context.vegasReset6.dest, /LAS VEGAS → YOSEMITE/, 'Reset Edits restores the original departure day');
   assert.match(context.vegasReset12.plan, /Final rest day • Prepare for Yellowstone/, 'Reset Edits restores the sacrificed master day exactly');
 
+  // Production path regression: a RED private-stay constraint may still have a
+  // safe proposal which works around (and never releases) that stay.
+  const overrideScript = fs.readFileSync('alter-trip-booking-override.js', 'utf8').replace("})(typeof window!=='undefined'?window:globalThis);", '})(globalThis);');
+  run("state={}; localStorage.removeItem(STORE); privateStayUserData={overrides:{'anne-tim-oconomowoc':{arrivalDate:'2026-09-11',departureDate:'2026-09-14'}},records:{'lauren-brett-ortonville':{id:'lauren-brett-ortonville',type:'PRIVATE_STAY',relationship:'FRIENDS_FAMILY',displayName:'Lauren & Brett',address:{street:'',city:'Ortonville',state:'MI',postcode:'',country:'USA'},visitType:'OVERNIGHT',arrivalDate:'2026-09-08',departureDate:'2026-09-10',priority:'IMPORTANT',status:'CONFIRMED',protected:true,phones:[]}}}; localStorage.setItem(PRIVATE_STAY_STORE,JSON.stringify(privateStayUserData)); privateStayUserData=loadPrivateStayUserData(); globalThis.milwaukeePrivateBefore=JSON.stringify(effectivePrivateStays()); globalThis.milwaukeeStateBefore=JSON.stringify(state); globalThis.milwaukeeStorageBefore=JSON.stringify(localStorage.data)");
+  vm.runInContext(overrideScript, context);
+  run("RouteIntelligence.setProvider({async routeAsync({origin,destination}){let values={'ortonville>indiana dunes':[300,220],'indiana dunes>milwaukee':[240,180],'milwaukee>bloomington':[358,203],'bloomington>nashville':[400,260]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}); document.getElementById('alter2Command').value='We don’t need to get to Milwaukee until later Friday and can leave earlier on Monday.'; submitAlter2Command(); globalThis.milwaukeeProductionImpact=alter2Pending; globalThis.milwaukeeImpactHtml=document.getElementById('alterModal').innerHTML; showAlter2FinalProposal(); globalThis.milwaukeeReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.milwaukeeStateAfterReview=JSON.stringify(state); globalThis.milwaukeeStorageAfterReview=JSON.stringify(localStorage.data); globalThis.milwaukeePrivateAfter=JSON.stringify(effectivePrivateStays())");
+  assert.equal(context.milwaukeeProductionImpact.status, 'RED', 'Impact Result retains the protected private-stay warning');
+  assert.equal(context.milwaukeeProductionImpact.protectedConstraintResolved, true, 'the repair is explicitly marked as working around, not releasing, the constraint');
+  assert.deepEqual(Array.from(context.milwaukeeProductionImpact.changes.map(change => change.date)), ['2026-09-10','2026-09-14','2026-09-15','2026-09-16']);
+  assert.equal(run("globalThis.milwaukeeProductionImpact.changes.some(change=>privateStaysForDate(change.date).some(stay=>stay.status==='CONFIRMED'&&stay.protected))"), false, 'no occupied protected private-stay date receives a proposed write');
+  assert.match(context.milwaukeeImpactHtml, /Anne &amp; Tim remains confirmed and protected/);
+  assert.match(context.milwaukeeReviewHtml, /Review Before Approval[\s\S]*ORTONVILLE → Indiana Dunes[\s\S]*Indiana Dunes → MILWAUKEE/i, 'MAKE A CHANGE renders the established split drive in the real review UI');
+  assert.doesNotMatch(context.milwaukeeReviewHtml, /No automatic changes are available/, 'the production review no longer loses the generated repair');
+  assert.match(context.milwaukeeReviewHtml, /ROUTE CHECKING/, 'all changed driving legs still require Worker verification before approval');
+  assert.match(context.milwaukeeReviewHtml, /id="alter2ApproveButton"[^>]*disabled/, 'approval remains blocked while verification is pending');
+  assert.doesNotMatch(context.milwaukeeImpactHtml, /RELEASE THESE BOOKINGS|Cruise America/, 'the long-running RV hire is not offered for release');
+  run("globalThis.milwaukeeRoutes={async resolveAsync({origin,destination}){let values={'ortonville>indiana dunes':[300,220],'indiana dunes>milwaukee':[240,180],'milwaukee>bloomington':[358,203],'bloomington>nashville':[400,260]}[origin.key+'>'+destination.key];return values?{reliable:true,distanceKm:values[0],durationMinutes:values[1],origin,destination,geometry:{type:'LineString',coordinates:[origin.coordinates,destination.coordinates]},waypoints:[],source:'mapbox-directions'}:{reliable:false}}}");
+  const milwaukeeVerification = await run('verifyAlter2Routes(globalThis.milwaukeeProductionImpact,{routeIntelligence:globalThis.milwaukeeRoutes})');
+  assert.equal(milwaukeeVerification.status, 'verified', 'every normal route check can complete before approval');
+  assert.equal(run('alter2ApprovalReady(globalThis.milwaukeeProductionImpact)'), true, 'approval becomes available only after all route and protection checks pass');
+  assert.equal(context.milwaukeeStateAfterReview, context.milwaukeeStateBefore, 'scan and Review Before Approval do not mutate itinerary state');
+  assert.equal(context.milwaukeeStorageAfterReview, context.milwaukeeStorageBefore, 'scan and Review Before Approval do not write localStorage');
+  assert.equal(context.milwaukeePrivateAfter, context.milwaukeePrivateBefore, 'Anne & Tim and Lauren & Brett remain byte-for-byte unchanged');
+
   run('RouteIntelligence.setProvider(null)');
   const missingRoute = await run("RouteIntelligence.resolveAsync({origin:'Origin',destination:'Destination',days:[]})");
   assert.equal(missingRoute.status, 'route_confirmation_required');
