@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 
 const html = fs.readFileSync('index.html', 'utf8');
 const browserScriptTags = [...html.matchAll(/<script(?:\s+src="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)].map(match => ({src:match[1] || '', code:match[2] || ''}));
-assert.deepEqual(browserScriptTags.map(tag => tag.src || 'inline'), ['inline','bookings-v2.js?v=20260819-1','alter-trip-booking-override.js?v=620270604b2d'], 'browser script load order remains inline app, Bookings, then Alter Trip override');
+assert.deepEqual(browserScriptTags.map(tag => tag.src || 'inline'), ['inline','bookings-v2.js?v=20260819-1','alter-trip-booking-override.js?v=ca69bd031eea'], 'browser script load order remains inline app, Bookings, then Alter Trip override');
 const alterOverrideHash = crypto.createHash('sha256').update(fs.readFileSync('alter-trip-booking-override.js')).digest('hex').slice(0,12);
 assert.equal(new URLSearchParams(browserScriptTags[2].src.split('?')[1]).get('v'), alterOverrideHash, 'Alter Trip override URL is content-versioned so production cannot reuse an older cached wrapper');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -410,30 +410,9 @@ assert.equal(localStorage.getItem('dwajp-trip-v5'),null,'exact command analysis 
 run("state={}; localStorage.removeItem(STORE); renderTripImpact(\"We don't need to get to Milwaukee until later on Friday and we can leave earlier on Monday.\"); globalThis.proposalBefore=JSON.stringify(state);");
 assert.equal(context.proposalBefore, '{}');
 assert.equal(localStorage.getItem('dwajp-trip-v5'), null);
-run("applyTripProposal('split-2026-09-10'); globalThis.thursdayChange=state.days['2026-09-10']; globalThis.fridayChange=state.days['2026-09-11']; globalThis.mondayChange=state.days['2026-09-14']; globalThis.tuesdayChange=state.days['2026-09-15']; globalThis.wednesdayChange=state.days['2026-09-16']; globalThis.fridayContact=mergedDays().find(d=>d.date==='2026-09-11').contact;");
-assert.match(context.thursdayChange.dest, /Indiana Dunes/);
-assert.match(context.thursdayChange.weather, /~305 km/);
-assert.equal(context.thursdayChange.contact, undefined, 'travel-only override cannot replace canonical private-stay contact/address data');
-assert.match(context.thursdayChange.maps, /Indiana%20Dunes/);
-assert.match(context.thursdayChange.route_maps, /Indiana%20Dunes/);
-assert.match(context.fridayChange.dest, /MILWAUKEE/i);
-assert.match(context.fridayChange.weather, /~305 km/);
-assert.match(context.fridayContact, /Anne & Tim/);
-assert.match(context.mondayChange.dest, /MILWAUKEE → BLOOMINGTON/i);
-assert.match(context.tuesdayChange.dest, /BLOOMINGTON → NASHVILLE/i);
-assert.equal(context.wednesdayChange.dest, 'NASHVILLE');
-assert.equal(run("state.days['2026-09-22']"), undefined);
-assert.ok(localStorage.getItem('dwajp-trip-v5'));
-assert.equal(modal.classList.open, false);
-
-// Re-opening analysis after approval reports the persisted split rather than a false safety warning.
-run("renderTripImpact(\"We don't need to get to Milwaukee until later on Friday and we can leave earlier on Monday.\"); globalThis.appliedResult=appliedSplitDrive();");
-assert.ok(context.appliedResult);
-assert.match(modal.innerHTML, /THIS CHANGE IS ALREADY APPLIED/);
-assert.match(modal.innerHTML, /ORTONVILLE → Indiana Dunes/);
-assert.match(modal.innerHTML, /Indiana Dunes → MILWAUKEE/);
-assert.match(modal.innerHTML, /Use RESET EDITS if you want to restore the original itinerary and reconsider this change/);
-assert.doesNotMatch(modal.innerHTML, /No automatic option is safe/);
+run("applyTripProposal('split-2026-09-10'); globalThis.legacyUnsafeState=JSON.stringify(state); globalThis.legacyUnsafeStorage=localStorage.getItem(STORE)");
+assert.equal(context.legacyUnsafeState,'{}','legacy split cannot write a different overnight on a protected private-stay night');
+assert.equal(context.legacyUnsafeStorage,null,'blocked legacy split does not write localStorage');
 
 // A new destination request must not reuse the already-applied Milwaukee proposal.
 run("renderTripImpact('I want an extra day in Nashville. Rearrange the travel days after Nashville if needed, but do not change any confirmed bookings or fixed events.'); globalThis.nashvilleAfterMilwaukee=document.getElementById('alterModal').innerHTML;");
@@ -1416,29 +1395,32 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(phoneContext.phoneImpact.status,'RED');
   assert.equal(phoneContext.phoneImpact.kind,'protected-stay-timing');
   assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.timingDates)),{laterArrival:'2026-09-11',earlierDeparture:'2026-09-14'});
-  assert.deepEqual(Array.from(phoneContext.phoneImpact.changes.map(change=>change.date)),['2026-09-10','2026-09-11','2026-09-14','2026-09-15','2026-09-16'],'canonical production dates produce the protected-stay timing workaround immediately after SCAN');
+  assert.deepEqual(Array.from(phoneContext.phoneImpact.changes.map(change=>change.date)),['2026-09-10','2026-09-11'],'only occupancy-compatible inbound timing remains in the automatic proposal');
   assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.affected.map(item=>[item.date,item.dest]))),[
-    ['2026-09-10','ORTONVILLE → Indiana Dunes'],
-    ['2026-09-11','Indiana Dunes → MILWAUKEE'],
-    ['2026-09-14','MILWAUKEE → BLOOMINGTON, IL'],
-    ['2026-09-15','BLOOMINGTON → NASHVILLE'],
-    ['2026-09-16','NASHVILLE']
-  ],'Impact Affected Days uses the exact effective date/route mapping from the proposal model');
+    ['2026-09-10','ORTONVILLE → Indiana Dunes → MILWAUKEE'],
+    ['2026-09-11','MILWAUKEE'],
+    ['2026-09-14','MILWAUKEE']
+  ],'Impact shows the coherent inbound alternative and the unchanged Monday occupancy conflict');
+  assert.equal(phoneContext.phoneImpact.protectedConstraintResolved,false);
+  assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.occupancyConflicts)),[{stayId:'anne-tim-oconomowoc',date:'2026-09-14',requestedOvernight:'BLOOMINGTON, IL',requiredDepartureDate:'2026-09-14'}]);
   assert.ok(phoneContext.phoneImpact.routeLegs.length>0);
   assert.doesNotMatch(phoneContext.phoneImpactHtml,/RELEASE THESE BOOKINGS|Cruise America/,'Cruise America is not offered for release');
   assert.match(phoneContext.phoneImpactHtml,/PRIVATE STAY PROTECTED — travel-only changes allowed\. Accommodation and private-stay data remain unchanged\./,'occupied dates with safe travel-only changes explain the entity-level protection rule');
-  assert.doesNotMatch(phoneContext.phoneImpactHtml,/PROTECTED COMMITMENT — no automatic write allowed\./,'safe travel-only dates do not show the hard protected-write warning');
+  assert.match(phoneContext.phoneImpactHtml,/Leaving for another overnight on 2026-09-14 would shorten the protected Anne &amp; Tim stay by one occupied night/i);
+  assert.match(phoneContext.phoneImpactHtml,/PROTECTED COMMITMENT — no automatic write allowed\./,'the incompatible Monday overnight retains the hard warning');
   phoneClick('MAKE A CHANGE');
   phoneRun("globalThis.phoneReviewPending=alter2Pending; globalThis.phoneSamePending=alter2Pending===globalThis.phoneImpactRef; globalThis.phoneReviewHtml=document.getElementById('alterModal').innerHTML; globalThis.phoneStateAfterReview=JSON.stringify(state); globalThis.phoneStorageAfterReview=JSON.stringify(localStorage.data); globalThis.phonePrivateAfter=JSON.stringify(effectivePrivateStays())");
   assert.equal(phoneContext.phoneSamePending,true,'MAKE A CHANGE reads the same alter2Pending object stored by the impact renderer');
-  assert.deepEqual(Array.from(phoneContext.phoneReviewPending.changes.map(change=>change.date)),['2026-09-10','2026-09-11','2026-09-14','2026-09-15','2026-09-16'],'the review retains the exact scanned proposal');
-  assert.deepEqual(JSON.parse(JSON.stringify(phoneContext.phoneImpact.affected.map(item=>[item.date,item.dest]))),JSON.parse(JSON.stringify(phoneContext.phoneReviewPending.changes.map(change=>[change.date,change.changes.dest]))),'Impact and Review derive their effective dates and routes from the same proposal model');
+  assert.deepEqual(Array.from(phoneContext.phoneReviewPending.changes.map(change=>change.date)),['2026-09-10','2026-09-11'],'the review retains only the occupancy-compatible scanned proposal');
   assert.match(phoneContext.phoneReviewHtml,/Review Before Approval/);
-  assert.match(phoneContext.phoneReviewHtml,/ORTONVILLE → Indiana Dunes[\s\S]*Indiana Dunes → MILWAUKEE/i);
+  assert.match(phoneContext.phoneReviewHtml,/ORTONVILLE → Indiana Dunes → MILWAUKEE/i);
+  assert.doesNotMatch(phoneContext.phoneReviewHtml,/Mon 14 Sep[\s\S]*MILWAUKEE → BLOOMINGTON/i,'Review never presents Monday Bloomington as compatible with the occupied night');
   assert.doesNotMatch(phoneContext.phoneReviewHtml,/No automatic changes are available/);
   assert.match(phoneContext.phoneReviewHtml,/id="alter2ApproveButton"[^>]*disabled/,'APPROVE remains disabled during Worker route verification');
   assert.equal(phoneRun("globalThis.phoneReviewPending.changes.filter(change=>privateStaysForDate(change.date).length).every(change=>change.travelOnlyPrivateStayId==='anne-tim-oconomowoc'&&Object.keys(change.changes).every(key=>ALTER2_PRIVATE_STAY_TRAVEL_FIELDS.has(key)))"),true,'occupied-date overrides contain travel-only fields and an explicit canonical-stay guard');
   assert.equal(phoneRun("proposalIsSafe({changes:[{date:'2026-09-11',travelOnlyPrivateStayId:'anne-tim-oconomowoc',changes:{dest:'Indiana Dunes → MILWAUKEE',plan:'Travel timing only',dest_query:'MILWAUKEE',maps:'map',route_maps:'route',weather:'DISTANCE TO VERIFY',verifiedRoute:null}}]})"),true,'travel-only fields may change on an occupied private-stay date');
+  assert.equal(phoneRun("proposalIsSafe({changes:[{date:'2026-09-14',travelOnlyPrivateStayId:'anne-tim-oconomowoc',changes:{dest:'MILWAUKEE → BLOOMINGTON, IL',plan:'Depart for another overnight',dest_query:'Bloomington, IL',maps:'map',route_maps:'route',weather:'DISTANCE TO VERIFY',verifiedRoute:null}}]})"),false,'a route ending at another overnight destination cannot masquerade as travel-only');
+  assert.equal(phoneRun("proposalIsSafe({changes:[{date:'2026-09-14',travelOnlyPrivateStayId:'anne-tim-oconomowoc',changes:{dest:'MILWAUKEE',plan:'Local sightseeing, then return to Anne & Tim',dest_query:'Milwaukee, WI',maps:'map',route_maps:'map',weather:'LOCAL',verifiedRoute:null}}]})"),true,'local sightseeing that returns to the protected stay remains allowed');
   assert.equal(phoneRun("proposalIsSafe({changes:[{date:'2026-09-11',travelOnlyPrivateStayId:'anne-tim-oconomowoc',changes:{contact:'replacement address'}}]})"),false,'canonical contact/address cannot be overwritten through a travel-only override');
   assert.equal(phoneRun("proposalIsSafe({changes:[{date:'2026-09-11',travelOnlyPrivateStayId:'anne-tim-oconomowoc',changes:{privateStayId:'removed'}}]})"),false,'private-stay association cannot be deleted or overwritten');
   assert.equal(phoneContext.phoneStateAfterReview,phoneContext.phoneStateBefore,'real event-path scan/review does not mutate itinerary state');
@@ -1446,7 +1428,7 @@ async function runRouteIntelligenceAsyncTests() {
   assert.equal(phoneContext.phonePrivateAfter,phoneContext.phonePrivateBefore,'Friends/Family records remain byte-for-byte unchanged');
   const phoneVerification = await phoneRun('verifyAlter2Routes(globalThis.phoneReviewPending,{routeIntelligence:RouteIntelligence})');
   assert.equal(phoneVerification.status,'verified');
-  assert.equal(phoneRun('alter2ApprovalReady(globalThis.phoneReviewPending)'),true,'approval becomes ready only after every normal route and protection check succeeds');
+  assert.equal(phoneRun('alter2ApprovalReady(globalThis.phoneReviewPending)'),false,'route verification cannot make an unresolved occupied-night conflict approval-ready');
   assert.equal(phoneRun('JSON.stringify(DWAJP_BOOKINGS.allBookings())'),phoneContext.phoneBookingsBefore,'Cruise America and every commercial booking remain unchanged');
   phoneRun("globalThis.hardPrivateImpact=analyseAlter2Request('Change Anne and Tim address on 11 September'); renderAlter2Analysis(globalThis.hardPrivateImpact); globalThis.hardPrivateImpactHtml=document.getElementById('alterModal').innerHTML");
   assert.equal(phoneContext.hardPrivateImpact.status,'RED','a request to alter canonical private-stay data remains RED');
@@ -1455,6 +1437,10 @@ async function runRouteIntelligenceAsyncTests() {
   assert.doesNotMatch(phoneContext.hardPrivateImpactHtml,/PRIVATE STAY PROTECTED — travel-only changes allowed/,'the travel-only message is not used for a private-stay entity mutation');
   assert.equal(phoneRun('JSON.stringify(state)'),phoneContext.phoneStateBefore,'hard protected analysis remains read-only');
   assert.equal(phoneRun('JSON.stringify(localStorage.data)'),phoneContext.phoneStorageBefore,'hard protected review does not write localStorage');
+  phoneRun("privateStayUserData.overrides['anne-tim-oconomowoc']={...DWAJP_PRIVATE_STAYS.byId('anne-tim-oconomowoc'),departureDate:'2026-09-14'}; globalThis.releasedMondayAnalysis=analyseAlter2Request('We don’t need to get to Milwaukee until later Friday and can leave earlier on Monday.'); globalThis.releasedMondayPrivate=JSON.stringify(DWAJP_PRIVATE_STAYS.byId('anne-tim-oconomowoc'))");
+  assert.equal(phoneContext.releasedMondayAnalysis.protectedConstraintResolved,true,'an already-approved canonical departure change permits Monday travel');
+  assert.ok(phoneContext.releasedMondayAnalysis.changes.some(change=>change.date==='2026-09-14'&&/BLOOMINGTON/i.test(change.changes.dest)),'Monday departure is proposed only after that occupied night has been explicitly removed from the canonical stay');
+  phoneRun("delete privateStayUserData.overrides['anne-tim-oconomowoc']");
 
   run('RouteIntelligence.setProvider(null)');
   const missingRoute = await run("RouteIntelligence.resolveAsync({origin:'Origin',destination:'Destination',days:[]})");
