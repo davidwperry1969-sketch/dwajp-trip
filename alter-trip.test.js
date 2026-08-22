@@ -357,6 +357,71 @@ assert.equal(run("DAYS.find(day=>day.date==='2026-09-23').status"), 'CONFIRMED',
 assert.match(run("DAYS.find(day=>day.date==='2026-09-23').contact"), /French Quarter RV Resort/);
 assert.equal(run("travelKm(DAYS.find(day=>day.date==='2026-09-23'))"), 0, 'the local second night has no stale driving distance');
 assert.equal(run("pressure(DAYS.find(day=>day.date==='2026-09-23'))"), 'easy', 'the local second night is not marked busy');
+
+// Truth Mode multi-day driving-pressure investigation is advisory until a
+// connected proposal has fully verified replacement legs.
+run(`globalThis.driveClusterDays=[
+  {date:'2026-11-01',dest:'ALPHA → CURRENT STOP',weather:'10–20°C • 650 km',status:'PLANNED',plan:'Flexible driving day',contact:''},
+  {date:'2026-11-02',dest:'CURRENT STOP → FIXED DESTINATION',weather:'12–22°C • 320 km',status:'PLANNED',plan:'Reach the existing destination',contact:''},
+  {date:'2026-11-03',dest:'FIXED DESTINATION',weather:'12–22°C • LOCAL',status:'OPTIONAL',plan:'Rest and sightseeing',contact:''}
+]; globalThis.driveScan=alter2ScanDrivingPressure(globalThis.driveClusterDays);`);
+assert.equal(run('driveScan.daysScanned'),3);
+assert.equal(run('driveScan.clusters.length'),1,'650 km + 320 km triggers a whole-window investigation');
+assert.equal(run('driveScan.clusters[0].totalKm'),970);
+assert.equal(run('driveScan.clusters[0].level'),'INVESTIGATE');
+assert.equal(run('driveScan.clusters[0].nearbyFlexibleDate'),'2026-11-03','a nearby flexible third day is identified without being changed');
+assert.equal(run(`alter2ScanDrivingPressure([{date:'a',dest:'A → B',weather:'10°C • 450 km',plan:'',contact:''},{date:'b',dest:'B → C',weather:'10°C • 340 km',plan:'',contact:''}]).clusters.length`),0,'under 800 km normally does not trigger investigation');
+assert.equal(run(`alter2ScanDrivingPressure([{date:'a',dest:'A → B',weather:'10°C • 550 km',plan:'',contact:''},{date:'b',dest:'B → C',weather:'10°C • 300 km',plan:'',contact:''}]).clusters[0].level`),'WATCH','800–899 km is reviewed when one day is already high pressure');
+run(`globalThis.driveChoice=alter2ChooseDriveRebalance(driveScan.clusters[0],[
+ {stop:'Equal Split',verified:true,forward:true,destinationPreserved:true,overnightSuitable:true,goodRvOvernight:true,detourMinutes:90,sightseeingBenefit:0,legs:[{distanceKm:485,durationMinutes:360,pressure:'GREEN',verification:'verified'},{distanceKm:485,durationMinutes:360,pressure:'GREEN',verification:'verified'}]},
+ {stop:'Practical RV Town',verified:true,forward:true,destinationPreserved:true,overnightSuitable:true,goodRvOvernight:true,detourMinutes:0,sightseeingBenefit:2,legs:[{distanceKm:575,durationMinutes:410,pressure:'YELLOW',verification:'verified'},{distanceKm:395,durationMinutes:285,pressure:'GREEN',verification:'verified'}]}
+]);`);
+assert.equal(run('driveChoice.action'),'PROPOSE REBALANCE');
+assert.equal(run('driveChoice.assessment'),'HIGH AND IMPROVABLE');
+assert.equal(run('driveChoice.candidate.stop'),'Practical RV Town','trip quality may select a practical 575/395 split instead of forcing 50/50');
+assert.deepEqual(Array.from(run('driveChoice.candidate.legs.map(leg=>leg.distanceKm)')),[575,395]);
+assert.match(run('driveChoice.reason'),/fixed destination[\s\S]*trip quality, not mathematical equality/i);
+run(`globalThis.easyDriveChoice=alter2ChooseDriveRebalance(driveScan.clusters[0],[
+ {stop:'Excellent Forward RV Stop',verified:true,forward:true,destinationPreserved:true,deadlinePreserved:true,overnightSuitable:true,goodRvOvernight:true,detourMinutes:0,sightseeingBenefit:1,legs:[{distanceKm:520,durationMinutes:360,pressure:'YELLOW',verification:'verified'},{distanceKm:450,durationMinutes:310,pressure:'GREEN',verification:'verified'}]}
+]);`);
+assert.equal(run('easyDriveChoice.action'),'PROPOSE REBALANCE');
+assert.equal(run('easyDriveChoice.assessment'),'EASY TO REBALANCE','a clear low-cost verified improvement receives the easy classification');
+run(`globalThis.keepChoice=alter2ChooseDriveRebalance(driveScan.clusters[0],[
+ {stop:'Poor Detour',verified:true,forward:true,destinationPreserved:true,overnightSuitable:false,legs:[{distanceKm:500,durationMinutes:360,pressure:'GREEN',verification:'verified'},{distanceKm:500,durationMinutes:360,pressure:'GREEN',verification:'verified'}]},
+ {stop:'Wrong Final Destination',verified:true,forward:true,destinationPreserved:false,overnightSuitable:true,legs:[{distanceKm:480,durationMinutes:340,pressure:'GREEN',verification:'verified'},{distanceKm:480,durationMinutes:340,pressure:'GREEN',verification:'verified'}]},
+ {stop:'Unverified Guess',verified:false,forward:true,destinationPreserved:true,overnightSuitable:true,legs:[{distanceKm:575,durationMinutes:410,pressure:'YELLOW',verification:'failed'},{distanceKm:395,durationMinutes:285,pressure:'GREEN',verification:'verified'}]}
+]);`);
+assert.equal(run('keepChoice.action'),'KEEP CURRENT ROUTE','no materially better verified practical split leaves the route unchanged');
+assert.equal(run('keepChoice.assessment'),'HIGH BUT NO BETTER PRACTICAL SPLIT');
+assert.match(run('keepChoice.reason'),/fully verified[\s\S]*fixed destination[\s\S]*overnight practicality[\s\S]*sightseeing time/i);
+run(`globalThis.protectedDriveScan=alter2ScanDrivingPressure([
+ {date:'2026-11-04',dest:'A → B',weather:'10°C • 650 km',status:'CONFIRMED',plan:'Fixed booking',contact:'Confirmed booking'},
+ {date:'2026-11-05',dest:'B → C',weather:'10°C • 320 km',status:'PLANNED',plan:'Drive',contact:''}
+]);`);
+assert.equal(run('protectedDriveScan.clusters[0].action'),'KEEP CURRENT ROUTE','protected commitments cannot be moved by the investigation');
+assert.equal(run('protectedDriveScan.clusters[0].assessment'),'HIGH BUT JUSTIFIED','high kilometres may be justified by deadline/commitment pressure rather than treated as a violation');
+run(`globalThis.deadlineChoice=alter2ChooseDriveRebalance(protectedDriveScan.clusters[0],[
+ {stop:'Tempting Split',verified:true,forward:true,destinationPreserved:true,deadlinePreserved:false,overnightSuitable:true,legs:[{distanceKm:500,durationMinutes:350,pressure:'GREEN',verification:'verified'},{distanceKm:470,durationMinutes:330,pressure:'GREEN',verification:'verified'}]}
+]);`);
+assert.equal(run('deadlineChoice.action'),'KEEP CURRENT ROUTE');
+assert.equal(run('deadlineChoice.assessment'),'HIGH BUT JUSTIFIED');
+assert.match(run('deadlineChoice.reason'),/combined driving is high[\s\S]*deadline[\s\S]*safest practical use of the available time/i);
+run(`globalThis.thousandDeadlineScan=alter2ScanDrivingPressure([
+ {date:'2026-12-01',dest:'A → B',weather:'10°C • 680 km',status:'PLANNED',plan:'Drive',contact:''},
+ {date:'2026-12-02',dest:'B → C',weather:'10°C • 360 km',status:'CONFIRMED',plan:'Confirmed fixed arrival',contact:'Confirmed booking'}
+]); globalThis.thousandDeadlineChoice=alter2ChooseDriveRebalance(thousandDeadlineScan.clusters[0],[]);`);
+assert.equal(run('thousandDeadlineScan.clusters[0].totalKm'),1040);
+assert.equal(run('thousandDeadlineChoice.assessment'),'HIGH BUT JUSTIFIED','a 1000+ km pair may remain unchanged when deadline pressure wins');
+assert.equal(run('thousandDeadlineChoice.action'),'KEEP CURRENT ROUTE');
+assert.match(run('renderAlter2DrivingPressureScan(driveScan)'),/TRUTH MODE — DRIVING BALANCE[\s\S]*STATUS: HIGH AND IMPROVABLE[\s\S]*BEFORE[\s\S]*650 km • TIME TO VERIFY[\s\S]*320 km • TIME TO VERIFY[\s\S]*Combined distance — 970 km[\s\S]*thresholds trigger investigation only; they are not failures or violations/i);
+run("globalThis.scanReadOnlyState=JSON.stringify(state); globalThis.scanReadOnlyStorage=JSON.stringify(localStorage.data); globalThis.masterPressureScan=alter2ScanDrivingPressure(mergedDays()); globalThis.scanReadOnlyStateAfter=JSON.stringify(state); globalThis.scanReadOnlyStorageAfter=JSON.stringify(localStorage.data)");
+assert.equal(context.scanReadOnlyStateAfter,context.scanReadOnlyState,'whole-trip pressure analysis does not mutate itinerary state');
+assert.equal(context.scanReadOnlyStorageAfter,context.scanReadOnlyStorage,'whole-trip pressure analysis does not write localStorage');
+run("globalThis.grandCanyonBefore=JSON.stringify(state); globalThis.grandCanyonStorageBefore=JSON.stringify(localStorage.data); globalThis.grandCanyonExtra=analyseAlter2Request('Stay another night in Grand Canyon. Make it work without changing confirmed bookings or MUST DO items.'); globalThis.grandCanyonAfter=JSON.stringify(state); globalThis.grandCanyonStorageAfter=JSON.stringify(localStorage.data)");
+assert.equal(run('grandCanyonExtra.scannedDays'),57,'Grand Canyon extra-night workflow still performs the complete trip scan');
+assert.ok(run('grandCanyonExtra.changes.length>0 || !!(grandCanyonExtra.solverDetails&&grandCanyonExtra.solverDetails.noSafeReason)'),'Grand Canyon retains its established concrete proposal or truthful no-safe-fit result');
+assert.equal(context.grandCanyonAfter,context.grandCanyonBefore,'Grand Canyon analysis remains read-only');
+assert.equal(context.grandCanyonStorageAfter,context.grandCanyonStorageBefore,'Grand Canyon analysis does not write localStorage');
 assert.equal(run("DAYS.find(day=>day.date==='2026-09-24').status"), 'PLANNED', 'the checkout day remains unchanged');
 assert.match(run("dayCard(mergedDays().find(day=>day.date==='2026-09-23'))"), /French Quarter RV Resort/);
 assert.doesNotMatch(run("dayCard(mergedDays().find(day=>day.date==='2026-09-23'))"), /accommodation to be confirmed/i);
